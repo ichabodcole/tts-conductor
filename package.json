@@ -1,0 +1,39 @@
+{
+  "name": "tts-conductor",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Monorepo for TTS core orchestration and provider packages",
+  "keywords": [
+    "tts",
+    "text-to-speech",
+    "monorepo",
+    "pnpm",
+    "turbo"
+  ],
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev --parallel",
+    "lint": "turbo run lint",
+    "test": "turbo run test",
+    "clean": "turbo run clean"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@typescript-eslint/eslint-plugin": "^8.44.1",
+    "@typescript-eslint/parser": "^8.44.1",
+    "@vitest/coverage-v8": "^3.2.4",
+    "eslint": "^9.36.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.6.2",
+    "tsup": "^8.5.0",
+    "turbo": "^1.12.4",
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8.44.1",
+    "vitest": "^3.2.4"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "packageManager": "pnpm@8.15.5"
+}

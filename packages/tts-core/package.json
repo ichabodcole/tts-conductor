@@ -1,0 +1,33 @@
+{
+  "name": "@tts-conductor/core",
+  "version": "0.0.0",
+  "description": "Core utilities for parsing, chunking, and assembling TTS audio",
+  "keywords": [
+    "tts",
+    "text-to-speech",
+    "audio",
+    "orchestration"
+  ],
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "tsup --clean",
+    "dev": "tsup --watch",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vitest --run --config ../../vitest.config.ts"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

@@ -1,0 +1,39 @@
+{
+  "name": "@tts-conductor/provider-elevenlabs",
+  "version": "0.0.0",
+  "description": "ElevenLabs provider bindings for the TTS Conductor ecosystem",
+  "keywords": [
+    "tts",
+    "elevenlabs",
+    "provider"
+  ],
+  "license": "UNLICENSED",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "clean": "tsup --clean",
+    "dev": "tsup --watch",
+    "lint": "eslint \"src/**/*.ts\"",
+    "test": "vitest --run --config ../../vitest.config.ts"
+  },
+  "peerDependencies": {
+    "@tts-conductor/core": "workspace:*"
+  },
+  "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.16.0"
+  },
+  "devDependencies": {
+    "@tts-conductor/core": "workspace:^"
+  }
+}
