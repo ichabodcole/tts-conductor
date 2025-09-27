@@ -25,7 +25,8 @@
     "clean": "tsup --clean",
     "dev": "tsup --watch",
     "lint": "eslint \"src/**/*.ts\"",
-    "test": "vitest --run --config ../../vitest.config.ts"
+    "test": "vitest --run --config ../../vitest.config.ts",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "@tts-conductor/core": "workspace:*"

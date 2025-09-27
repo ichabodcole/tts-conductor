@@ -1,17 +1,31 @@
 import { defineConfig } from 'vitest/config';
 
-export default defineConfig({
-  test: {
-    environment: 'node',
-    passWithNoTests: true,
-    include: [
-      'packages/tts-core/src/**/*.test.ts',
-      'packages/tts-provider-elevenlabs/src/**/*.test.ts',
-    ],
-    reporters: [['default', { summary: false }]],
-    coverage: {
-      provider: 'v8',
-      reportsDirectory: './coverage',
-    },
+const sharedTestConfig = {
+  environment: 'node' as const,
+  passWithNoTests: true,
+  coverage: {
+    provider: 'v8' as const,
+    reportsDirectory: './coverage',
   },
+};
+
+export default defineConfig({
+  projects: [
+    {
+      test: {
+        ...sharedTestConfig,
+        include: ['packages/tts-core/src/**/*.test.ts'],
+        name: 'tts-core',
+        reporters: ['basic'],
+      },
+    },
+    {
+      test: {
+        ...sharedTestConfig,
+        include: ['packages/tts-provider-elevenlabs/src/**/*.test.ts'],
+        name: 'tts-provider-elevenlabs',
+        reporters: ['basic'],
+      },
+    },
+  ],
 });

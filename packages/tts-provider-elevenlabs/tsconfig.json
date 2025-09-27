@@ -3,11 +3,8 @@
   "compilerOptions": {
     "rootDir": "src",
     "noEmit": true,
-    "types": [
-      "node"
-    ]
+    "types": ["node"],
+    "lib": ["ES2021", "DOM.Iterable", "DOM"]
   },
-  "include": [
-    "src"
-  ]
+  "include": ["src"]
 }

@@ -16,7 +16,12 @@
     "dev": "turbo run dev --parallel",
     "lint": "turbo run lint",
     "test": "turbo run test",
-    "clean": "turbo run clean"
+    "typecheck": "turbo run typecheck",
+    "test:coverage": "vitest run --coverage --config vitest.config.ts",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "clean": "turbo run clean",
+    "verify": "pnpm run format:check && pnpm run typecheck && pnpm run lint && pnpm run test"
   },
   "devDependencies": {
     "@types/node": "^24.5.2",

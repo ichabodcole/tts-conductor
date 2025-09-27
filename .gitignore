@@ -3,3 +3,21 @@ pnpm-lock.yaml
 .dist
 .turbo
 .DS_Store
+coverage
+
+.DS_Store
+.eslintcache
+
+# Logs
+logs
+*.log
+
+# Misc
+.DS_Store
+.fleet
+.idea
+
+# Local env files
+.env
+.env.*
+!.env.example
