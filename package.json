@@ -1,7 +1,7 @@
 {
   "name": "tts-conductor",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Monorepo for TTS core orchestration and provider packages",
   "keywords": [
     "tts",
