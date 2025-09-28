@@ -1,6 +1,6 @@
+import type { TtsProviderContext, TtsRuntimeConfig } from '@tts-conductor/core';
 import { Readable } from 'node:stream';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TtsProviderContext, TtsRuntimeConfig } from '@tts-conductor/core';
 
 const convertHandler = vi.hoisted(() => vi.fn());
 const ElevenLabsClientMock = vi.hoisted(() =>
@@ -18,7 +18,7 @@ vi.mock('@elevenlabs/elevenlabs-js', () => ({
 const getAudioDurationMock = vi.hoisted(() => vi.fn().mockResolvedValue(1.5));
 
 vi.mock('@tts-conductor/core', async () => {
-  const actual = await vi.importActual<any>('@tts-conductor/core');
+  const actual = await vi.importActual<Record<string, unknown>>('@tts-conductor/core');
   return {
     ...actual,
     getAudioDuration: getAudioDurationMock,

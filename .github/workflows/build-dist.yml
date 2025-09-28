@@ -1,0 +1,37 @@
+name: build-dist
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-and-commit:
+    runs-on: ubuntu-latest
+
+    if: "${{ contains(github.event.pull_request.labels.*.name, 'autorelease: pending') }}"
+
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Commit dist outputs
+        uses: stefanzweifel/git-auto-commit-action@v6
+        with:
+          commit_message: 'chore: rebuild dist for release'
+          commit_user_name: github-actions[bot]
+          commit_user_email: 41898282+github-actions[bot]@users.noreply.github.com

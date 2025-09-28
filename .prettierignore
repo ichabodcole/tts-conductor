@@ -5,3 +5,5 @@ dist
 pnpm-lock.yaml
 **/build
 **/tmp
+
+CHANGELOG.md
