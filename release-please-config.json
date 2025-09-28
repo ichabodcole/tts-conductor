@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "packages": {
+    "packages/tts-core": {
+      "release-type": "node",
+      "package-name": "@tts-conductor/core",
+      "changelog-path": "packages/tts-core/CHANGELOG.md"
+    },
+    "packages/tts-provider-elevenlabs": {
+      "release-type": "node",
+      "package-name": "@tts-conductor/provider-elevenlabs",
+      "changelog-path": "packages/tts-provider-elevenlabs/CHANGELOG.md"
+    }
+  }
+}
