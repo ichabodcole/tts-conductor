@@ -1,6 +1,6 @@
 {
   "name": "@tts-conductor/provider-elevenlabs",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "ElevenLabs provider bindings for the TTS Conductor ecosystem",
   "keywords": [
     "tts",
