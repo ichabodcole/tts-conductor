@@ -1,6 +1,6 @@
 {
   "name": "@tts-conductor/core",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Core utilities for parsing, chunking, and assembling TTS audio",
   "keywords": [
     "tts",
