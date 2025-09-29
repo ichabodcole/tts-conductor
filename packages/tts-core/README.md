@@ -24,6 +24,104 @@ const result = await conductor.generateFull('Hello world', provider);
 
 All utilities (`parseScript`, `toChunks`, `buildFinalAudio`, etc.) are also exported for lower-level integration.
 
+## Debugging
+
+The core package includes a flexible debugging system for inspecting audio processing. Debug sinks can capture intermediate audio buffers and final assembled files for development, testing, and monitoring.
+
+### Basic Setup
+
+```ts
+import { createTtsConductor, ProcessStage } from '@tts-conductor/core';
+import type { DebugSink, DebugMeta } from '@tts-conductor/core';
+
+class FileSystemDebugSink implements DebugSink {
+  async saveBuffer(buffer: Buffer, meta: DebugMeta): Promise<void> {
+    const filePath = `/debug/audio/${meta.stage}/${meta.fileName}`;
+    await fs.writeFile(filePath, buffer);
+    console.log(`Saved debug audio: ${filePath}`);
+  }
+
+  async saveFile(path: string, meta: DebugMeta): Promise<void> {
+    const destPath = `/debug/audio/${meta.stage}/${meta.fileName}`;
+    await fs.copyFile(path, destPath);
+    console.log(`Copied debug file: ${destPath}`);
+  }
+}
+
+const conductor = createTtsConductor({
+  pauses: DEFAULT_PAUSE_TABLE,
+  debug: new FileSystemDebugSink(), // Enable debug output
+});
+```
+
+### Debug Metadata
+
+Debug sinks receive rich metadata with each audio output:
+
+```typescript
+enum ProcessStage {
+  Raw = 'raw', // Individual audio chunks from providers
+  Final = 'final', // Final assembled audio after stitching
+  Unknown = 'unknown', // Fallback stage when not specified
+}
+
+interface DebugMeta {
+  fileName: string; // Descriptive filename (e.g., "raw_11labs_0_123456789.mp3")
+  jobId?: string; // Optional correlation ID from consuming project
+  stage: ProcessStage | string; // Processing stage
+  [key: string]: unknown; // Custom metadata from providers/projects
+}
+```
+
+**Standard Stages:**
+
+- `'raw'` - Individual audio chunks from providers
+- `'final'` - Final assembled audio after stitching
+- `'unknown'` - Fallback stage when not specified by caller
+
+### Advanced Usage
+
+```ts
+// Projects can add custom correlation and metadata
+await conductor.generateFull(text, provider, progress, {
+  debugJobId: 'user-session-123', // Correlate all debug outputs for this job
+});
+
+// Debug sinks can use metadata for organization
+class DatabaseDebugSink implements DebugSink {
+  async saveBuffer(buffer: Buffer, meta: DebugMeta): Promise<void> {
+    await db.audioDebug.create({
+      jobId: meta.jobId,
+      stage: meta.stage,
+      fileName: meta.fileName,
+      size: buffer.length,
+      customField: meta.customField, // Access custom metadata
+    });
+  }
+
+  async saveFile(path: string, meta: DebugMeta): Promise<void> {
+    // Implementation for file saving
+  }
+}
+```
+
+### Provider-Level Debugging
+
+Providers can add their own debug metadata:
+
+```ts
+// Inside a provider's generate method
+await saveDebugFromBuffer(config, audioBuffer, {
+  stage: ProcessStage.Raw, // Use enum for type safety
+  providerName: 'elevenlabs',
+  voiceId: 'voice-123',
+  latency: 250,
+  requestId: 'req-456',
+});
+```
+
+Debug output is **completely opt-in** - if no debug sink is configured, there's zero performance overhead.
+
 ### Provider integration
 
 Every provider factory must expose `caps: ProviderCapabilities`. In addition to limits such as `maxInlineBreakSeconds` and `maxCharsPerRequest`, you can now supply `renderInlineBreak(seconds)` when the target engine expects a custom inline pause tag (for example, `<mark name="pause:${seconds}"/>`). If omitted, the core falls back to SSML `<break time="${seconds}s" />` markup. Providers that cannot inline pauses should set `maxInlineBreakSeconds` to `null`.

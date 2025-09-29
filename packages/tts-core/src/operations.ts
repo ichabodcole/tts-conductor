@@ -1,4 +1,5 @@
 import type { BuildAudioOptions, TtsRuntimeConfig } from './config';
+import { ProcessStage } from './config';
 import type { TtsProvider } from './provider';
 import type { Chunk } from './utils/chunker';
 import { toChunks } from './utils/chunker';
@@ -62,7 +63,7 @@ export async function ttsGenerateFull(
     await saveDebugFromBuffer(config, res.audio, {
       fileName: `raw_${providerId}_${i}_${Date.now()}.mp3`,
       jobId: options?.debugJobId,
-      stage: 'raw',
+      stage: ProcessStage.Raw,
     });
 
     const chunkProgress = Math.round((done / chunks.length) * 80);

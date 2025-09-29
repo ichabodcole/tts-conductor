@@ -1,3 +1,11 @@
+// src/config.ts
+var ProcessStage = /* @__PURE__ */ ((ProcessStage2) => {
+  ProcessStage2["Raw"] = "raw";
+  ProcessStage2["Final"] = "final";
+  ProcessStage2["Unknown"] = "unknown";
+  return ProcessStage2;
+})(ProcessStage || {});
+
 // src/utils/chunker.ts
 function splitByBoundaries(input, maxLen) {
   const chunks = [];
@@ -89,7 +97,8 @@ function buildMeta(options) {
   return {
     fileName: options.fileName ?? `tts_${Date.now()}.mp3`,
     jobId: options.jobId,
-    stage: options.stage
+    stage: options.stage ?? "unknown" /* Unknown */
+    // Provide default if not specified
   };
 }
 async function saveDebugFromBuffer(config, buffer, options = {}) {
@@ -289,10 +298,10 @@ function parseScript(input, table, logger) {
 }
 
 // src/utils/stitcher.ts
-import fs2 from "fs/promises";
-import path2 from "path";
-import { tmpdir as tmpdir2 } from "os";
 import { execa as execa2 } from "execa";
+import fs2 from "fs/promises";
+import { tmpdir as tmpdir2 } from "os";
+import path2 from "path";
 var silenceCache = /* @__PURE__ */ new Map();
 var MAX_SILENCE_CACHE_SIZE = 50;
 async function resolveFfmpegBin2(ffmpegConfig) {
@@ -469,7 +478,7 @@ async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now
     await saveDebugFromFile(config, outPath, {
       fileName: `final_${fileName}`,
       jobId: options?.debugJobId,
-      stage: "final"
+      stage: "final" /* Final */
     });
     const buf = await fs2.readFile(outPath);
     const durationSec = audio.reduce((sum, part, idx) => {
@@ -538,7 +547,7 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
     await saveDebugFromBuffer(config, res.audio, {
       fileName: `raw_${providerId}_${i}_${Date.now()}.mp3`,
       jobId: options?.debugJobId,
-      stage: "raw"
+      stage: "raw" /* Raw */
     });
     const chunkProgress = Math.round(done / chunks.length * 80);
     onProgress?.(chunkProgress);
@@ -613,6 +622,7 @@ var DEFAULT_PAUSE_TABLE = {
 };
 export {
   DEFAULT_PAUSE_TABLE,
+  ProcessStage,
   TtsConductor,
   buildFinalAudio,
   createTtsConductor,

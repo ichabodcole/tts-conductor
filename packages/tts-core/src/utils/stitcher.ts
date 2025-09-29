@@ -1,11 +1,11 @@
-import fs from 'fs/promises';
-import path from 'path';
-import { tmpdir } from 'os';
 import { execa } from 'execa';
-import type { BuildAudioOptions, TtsRuntimeConfig, TtsLogger } from '../config';
+import fs from 'fs/promises';
+import { tmpdir } from 'os';
+import path from 'path';
+import type { BuildAudioOptions, FfmpegConfig, TtsLogger, TtsRuntimeConfig } from '../config';
+import { ProcessStage } from '../config';
 import type { Chunk } from './chunker';
 import { saveDebugFromFile } from './debug';
-import type { FfmpegConfig } from '../config';
 
 interface AudioPart {
   buffer: Buffer;
@@ -233,7 +233,7 @@ export async function buildFinalAudio(
     await saveDebugFromFile(config, outPath, {
       fileName: `final_${fileName}`,
       jobId: options?.debugJobId,
-      stage: 'final',
+      stage: ProcessStage.Final,
     });
 
     const buf = await fs.readFile(outPath);

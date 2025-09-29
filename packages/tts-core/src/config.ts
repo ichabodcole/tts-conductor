@@ -1,3 +1,12 @@
+export enum ProcessStage {
+  /** Individual audio chunks from providers */
+  Raw = 'raw',
+  /** Final assembled audio after stitching */
+  Final = 'final',
+  /** Fallback stage when not specified by caller */
+  Unknown = 'unknown',
+}
+
 export interface TtsLogger {
   debug?: (...args: unknown[]) => void;
   info?: (...args: unknown[]) => void;
@@ -6,9 +15,10 @@ export interface TtsLogger {
 }
 
 export interface DebugMeta {
-  fileName: string;
-  jobId?: string;
-  stage?: 'raw' | 'final' | string;
+  fileName: string; // Always provided by core package
+  jobId?: string; // Optional, provided by consuming projects
+  stage: ProcessStage | string; // Always provided by core package
+  [key: string]: unknown; // Allow arbitrary additional metadata
 }
 
 export interface DebugSink {

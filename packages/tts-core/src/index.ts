@@ -1,4 +1,5 @@
 export { TtsConductor, createTtsConductor } from './conductor';
+export { ProcessStage } from './config';
 export type {
   BuildAudioOptions,
   DebugMeta,

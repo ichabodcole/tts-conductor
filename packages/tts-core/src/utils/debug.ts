@@ -1,4 +1,5 @@
 import type { DebugMeta, TtsRuntimeConfig } from '../config';
+import { ProcessStage } from '../config';
 
 export interface DebugOptions {
   fileName?: string;
@@ -10,7 +11,7 @@ function buildMeta(options: DebugOptions): DebugMeta {
   return {
     fileName: options.fileName ?? `tts_${Date.now()}.mp3`,
     jobId: options.jobId,
-    stage: options.stage,
+    stage: options.stage ?? ProcessStage.Unknown, // Provide default if not specified
   };
 }
 

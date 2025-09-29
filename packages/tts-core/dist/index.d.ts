@@ -1,3 +1,11 @@
+declare enum ProcessStage {
+    /** Individual audio chunks from providers */
+    Raw = "raw",
+    /** Final assembled audio after stitching */
+    Final = "final",
+    /** Fallback stage when not specified by caller */
+    Unknown = "unknown"
+}
 interface TtsLogger {
     debug?: (...args: unknown[]) => void;
     info?: (...args: unknown[]) => void;
@@ -7,7 +15,8 @@ interface TtsLogger {
 interface DebugMeta {
     fileName: string;
     jobId?: string;
-    stage?: 'raw' | 'final' | string;
+    stage: ProcessStage | string;
+    [key: string]: unknown;
 }
 interface DebugSink {
     saveBuffer?: (buffer: Buffer, meta: DebugMeta) => Promise<void> | void;
@@ -152,4 +161,4 @@ declare function ttsGenerateFull(rawText: string, provider: TtsProvider, config:
 declare function getAudioDuration(audioBuffer: Buffer, ffmpegConfig?: FfmpegConfig, logger?: TtsLogger): Promise<number>;
 declare function estimateAudioDuration(audioBuffer: Buffer, bitrate?: number): number;
 
-export { type BuildAudioOptions, type BuildFinalAudioResult, DEFAULT_PAUSE_TABLE, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerationResult, type PauseTable, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsConductor, type TtsLogger, type TtsProvider, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, type TtsRuntimeConfig, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
+export { type BuildAudioOptions, type BuildFinalAudioResult, DEFAULT_PAUSE_TABLE, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerationResult, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsConductor, type TtsLogger, type TtsProvider, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, type TtsRuntimeConfig, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
