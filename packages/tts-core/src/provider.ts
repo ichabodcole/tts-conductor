@@ -7,12 +7,13 @@ export interface ProviderCapabilities {
 
 export interface GenerationResult {
   audio: Buffer;
-  mimeType: string;
-  duration: number;
-  size: number;
+  mimeType?: string;
+  duration?: number;
+  size?: number;
 }
 
 export interface TtsProvider {
+  readonly id: string;
   readonly caps: ProviderCapabilities;
   generate(chunk: string): Promise<GenerationResult>;
 }

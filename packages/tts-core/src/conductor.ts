@@ -1,10 +1,21 @@
 import type { BuildAudioOptions, TtsRuntimeConfig } from './config';
-import type { TtsProvider } from './provider';
-import type { TtsProviderFactory } from './factory';
+import type {
+  ProviderOptionsFor,
+  RegisteredProviderIds,
+  TtsProviderContext,
+  TtsProviderFactory,
+} from './factory';
 import { ttsGenerateFull } from './operations';
+import type { TtsProvider } from './provider';
+
+// Use a more flexible approach - store the factory with minimal typing
+interface StoredFactory {
+  id: string;
+  create: (ctx: TtsProviderContext, options: object) => TtsProvider;
+}
 
 export class TtsConductor {
-  private providers = new Map<string, TtsProviderFactory<object>>();
+  private providers = new Map<string, StoredFactory>();
 
   constructor(private readonly config: TtsRuntimeConfig) {}
 
@@ -12,9 +23,17 @@ export class TtsConductor {
     return this.config;
   }
 
-  registerProvider(factory: TtsProviderFactory<object>) {
-    this.providers.set(factory.id, factory);
+  /**
+   * Register a provider factory with type-safe options.
+   * Provider must be registered in the TtsProviderRegistry via module augmentation.
+   */
+  registerProvider<T extends RegisteredProviderIds>(factory: TtsProviderFactory<T>): T {
+    this.providers.set(factory.id, {
+      id: factory.id,
+      create: factory.create as (ctx: TtsProviderContext, options: object) => TtsProvider,
+    });
     this.config.logger?.debug?.('Registered provider', factory.id);
+    return factory.id;
   }
 
   hasProvider(id: string): boolean {
@@ -25,13 +44,20 @@ export class TtsConductor {
     return Array.from(this.providers.keys());
   }
 
-  createProvider<Options extends object>(id: string, options: Options): TtsProvider {
-    const factory = this.providers.get(id) as TtsProviderFactory<Options> | undefined;
+  /**
+   * Create a provider instance with type-safe options.
+   * Provider must be registered in the TtsProviderRegistry via module augmentation.
+   */
+  createProvider<T extends RegisteredProviderIds>(
+    id: T,
+    options: ProviderOptionsFor<T>,
+  ): TtsProvider {
+    const factory = this.providers.get(id);
     if (!factory) {
       throw new Error(`Provider '${id}' is not registered`);
     }
     this.config.logger?.info?.('Creating provider instance', id, { options });
-    return factory.create({ config: this.config }, options);
+    return factory.create({ config: this.config, id: factory.id }, options);
   }
 
   async generateFull(

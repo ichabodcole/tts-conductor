@@ -1,5 +1,5 @@
-import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import type { ElevenLabs as ElevenLabsTypes } from '@elevenlabs/elevenlabs-js';
+import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import type {
   GenerationResult,
   ProviderCapabilities,
@@ -26,6 +26,13 @@ export interface ElevenLabsProviderOptions {
   quality?: ElevenLabsQuality;
 }
 
+// Register the ElevenLabs provider in the type registry
+declare module '@tts-conductor/core' {
+  interface TtsProviderRegistry {
+    '11labs': ElevenLabsProviderOptions;
+  }
+}
+
 const CAPS: ProviderCapabilities = {
   maxInlineBreakSeconds: 3,
   maxCharsPerRequest: 1200,
@@ -33,6 +40,7 @@ const CAPS: ProviderCapabilities = {
 };
 
 class ElevenLabsProvider implements TtsProvider {
+  readonly id: string;
   readonly caps = CAPS;
   private client: ElevenLabsClient;
 
@@ -40,6 +48,7 @@ class ElevenLabsProvider implements TtsProvider {
     private readonly ctx: TtsProviderContext,
     private readonly options: ElevenLabsProviderOptions,
   ) {
+    this.id = ctx.id;
     this.client = new ElevenLabsClient({ apiKey: options.apiKey });
   }
 
@@ -119,9 +128,9 @@ async function streamToBuffer(stream: ElevenLabsStream): Promise<Buffer> {
   });
 }
 
-export const elevenLabsProviderFactory: TtsProviderFactory<ElevenLabsProviderOptions> = {
+export const elevenLabsProviderFactory: TtsProviderFactory<'11labs'> = {
   id: '11labs',
-  create(ctx, options) {
+  create(ctx: TtsProviderContext, options: ElevenLabsProviderOptions) {
     if (!options.apiKey) {
       throw new Error('ElevenLabs provider requires an apiKey');
     }

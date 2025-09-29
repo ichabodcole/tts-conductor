@@ -8,15 +8,25 @@ ElevenLabs provider factory for the TTS Conductor ecosystem. Creates `TtsProvide
 import { createTtsConductor, DEFAULT_PAUSE_TABLE } from '@tts-conductor/core';
 import { elevenLabsProviderFactory } from '@tts-conductor/provider-elevenlabs';
 
+// Instantiate the conductor once at application startup.
 const conductor = createTtsConductor({
   pauses: DEFAULT_PAUSE_TABLE,
   logger: console,
 });
 
-conductor.registerProvider(elevenLabsProviderFactory);
+// Register the factory once so the conductor knows how to build ElevenLabs providers.
+const elevenLabsId = conductor.registerProvider(elevenLabsProviderFactory);
+
+// Create a configured provider instance when you need to generate audio.
+// TypeScript enforces correct option types for '11labs' provider
 const provider = conductor.createProvider('11labs', {
   apiKey: process.env.ELEVENLABS_API_KEY!,
   voiceId: 'your-voice-id',
+  quality: 'standard', // ✅ TypeScript validates this
+  voiceSettings: {
+    stability: 0.5,
+    similarity_boost: 0.8,
+  },
 });
 
 const result = await conductor.generateFull('Hello world', provider);

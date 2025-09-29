@@ -11,6 +11,7 @@ var ElevenLabsProvider = class {
     this.ctx = ctx;
     this.options = options;
     this.caps = CAPS;
+    this.id = ctx.id;
     this.client = new ElevenLabsClient({ apiKey: options.apiKey });
   }
   async generate(chunk) {

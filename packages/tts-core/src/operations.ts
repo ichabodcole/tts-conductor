@@ -1,12 +1,12 @@
 import type { BuildAudioOptions, TtsRuntimeConfig } from './config';
 import type { TtsProvider } from './provider';
-import { parseScript } from './utils/segmenter';
-import { toChunks } from './utils/chunker';
 import type { Chunk } from './utils/chunker';
-import { getAudioDuration } from './utils/duration';
-import { buildFinalAudio } from './utils/stitcher';
-import type { BuildFinalAudioResult } from './utils/stitcher';
+import { toChunks } from './utils/chunker';
 import { saveDebugFromBuffer } from './utils/debug';
+import { getAudioDuration } from './utils/duration';
+import { parseScript } from './utils/segmenter';
+import type { BuildFinalAudioResult } from './utils/stitcher';
+import { buildFinalAudio } from './utils/stitcher';
 
 export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   let timer: NodeJS.Timeout;
@@ -29,7 +29,7 @@ export async function ttsGenerateFull(
   options?: BuildAudioOptions,
 ): Promise<BuildFinalAudioResult> {
   const logger = config.logger;
-  const providerId = (provider as { id?: string }).id ?? 'provider';
+  const providerId = provider.id;
 
   const segments = parseScript(rawText, config.pauses, logger);
   logger?.info?.('[tts] Parsed segments', { count: segments.length });
@@ -52,7 +52,10 @@ export async function ttsGenerateFull(
     onProgress?.(Math.min(10, Math.round(((i + 1) / chunks.length) * 10)));
 
     const res = await withTimeout(provider.generate(input), 60000, `provider.generate chunk ${i}`);
-    const duration = await getAudioDuration(res.audio, config.ffmpeg, logger);
+
+    // Trust provider duration if supplied, otherwise compute it:
+    const duration = res.duration ?? (await getAudioDuration(res.audio, config.ffmpeg, logger));
+
     audioParts.push({ buffer: res.audio, duration });
     done++;
 

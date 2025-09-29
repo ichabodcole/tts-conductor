@@ -5,13 +5,13 @@
       "release-type": "node",
       "package-name": "@tts-conductor/core",
       "component": "@tts-conductor/core",
-      "changelog-path": "packages/tts-core/CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md"
     },
     "packages/tts-provider-elevenlabs": {
       "release-type": "node",
       "package-name": "@tts-conductor/provider-elevenlabs",
       "component": "@tts-conductor/provider-elevenlabs",
-      "changelog-path": "packages/tts-provider-elevenlabs/CHANGELOG.md"
+      "changelog-path": "CHANGELOG.md"
     }
   }
 }

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { TtsProviderContext, TtsRuntimeConfig } from '@tts-conductor/core';
+import { describe, expect, it } from 'vitest';
 import { elevenLabsProviderFactory } from '../elevenLabsProvider';
 
 const runtimeConfig: TtsRuntimeConfig = {
@@ -8,6 +8,7 @@ const runtimeConfig: TtsRuntimeConfig = {
 
 const context: TtsProviderContext = {
   config: runtimeConfig,
+  id: '11labs',
 };
 
 describe('elevenLabsProviderFactory', () => {

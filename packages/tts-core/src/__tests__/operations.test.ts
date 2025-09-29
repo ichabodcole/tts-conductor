@@ -1,7 +1,7 @@
-import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ttsGenerateFull, withTimeout } from '../operations';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TtsRuntimeConfig } from '../config';
-import type { TtsProvider, GenerationResult } from '../provider';
+import { ttsGenerateFull, withTimeout } from '../operations';
+import type { GenerationResult, TtsProvider } from '../provider';
 
 const parseScriptMock = vi.hoisted(() => vi.fn());
 const toChunksMock = vi.hoisted(() => vi.fn());
@@ -62,12 +62,13 @@ describe('ttsGenerateFull', () => {
 
   beforeEach(() => {
     provider = {
+      id: 'test-provider',
       caps: { maxInlineBreakSeconds: 3, maxCharsPerRequest: 100 },
       async generate() {
         return {
           audio: Buffer.from('fake'),
           mimeType: 'audio/mpeg',
-          duration: 0,
+          duration: 1.25,
           size: 4,
         } satisfies GenerationResult;
       },
@@ -90,11 +91,8 @@ describe('ttsGenerateFull', () => {
     );
     expect(toChunksMock).toHaveBeenCalled();
     expect(generateSpy).toHaveBeenCalledWith('<speak>Hello world</speak>');
-    expect(getAudioDurationMock).toHaveBeenCalledWith(
-      expect.any(Buffer),
-      runtimeConfig.ffmpeg,
-      runtimeConfig.logger,
-    );
+    // Provider supplies duration, so ffprobe should not be called
+    expect(getAudioDurationMock).not.toHaveBeenCalled();
     expect(saveDebugFromBufferMock).toHaveBeenCalledWith(
       runtimeConfig,
       expect.any(Buffer),
@@ -108,6 +106,7 @@ describe('ttsGenerateFull', () => {
 
   it('throws when provider.generate exceeds timeout', async () => {
     const slowProvider: TtsProvider = {
+      id: 'slow-provider',
       caps: provider.caps,
       generate: () =>
         new Promise<GenerationResult>((resolve) =>
@@ -116,7 +115,7 @@ describe('ttsGenerateFull', () => {
               resolve({
                 audio: Buffer.from('late'),
                 mimeType: 'audio/mpeg',
-                duration: 0,
+                duration: 1.25,
                 size: 4,
               }),
             70_000,
@@ -131,6 +130,46 @@ describe('ttsGenerateFull', () => {
     await vi.advanceTimersByTimeAsync(60_000);
 
     await expectation;
+  });
+
+  it('trusts provider-supplied duration without calling ffprobe', async () => {
+    const providerWithDuration: TtsProvider = {
+      id: 'fast-provider',
+      caps: provider.caps,
+      async generate() {
+        return {
+          audio: Buffer.from('fake'),
+          duration: 2.5, // Provider supplies duration
+        };
+      },
+    };
+
+    await ttsGenerateFull('Hello', providerWithDuration, runtimeConfig);
+
+    // ffprobe should NOT be called since provider supplied duration
+    expect(getAudioDurationMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to ffprobe when provider omits duration', async () => {
+    const providerWithoutDuration: TtsProvider = {
+      id: 'minimal-provider',
+      caps: provider.caps,
+      async generate() {
+        return {
+          audio: Buffer.from('fake'),
+          // No duration supplied
+        };
+      },
+    };
+
+    await ttsGenerateFull('Hello', providerWithoutDuration, runtimeConfig);
+
+    // ffprobe SHOULD be called as fallback
+    expect(getAudioDurationMock).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      runtimeConfig.ffmpeg,
+      runtimeConfig.logger,
+    );
   });
 });
 

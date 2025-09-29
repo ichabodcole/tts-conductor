@@ -1,3 +1,199 @@
+// src/utils/chunker.ts
+function splitByBoundaries(input, maxLen) {
+  const chunks = [];
+  let text = input;
+  const hardMax = Math.max(1, maxLen);
+  const isInsideTag = (str, pos) => {
+    const lastLt = str.lastIndexOf("<", pos);
+    const lastGt = str.lastIndexOf(">", pos);
+    return lastLt > lastGt;
+  };
+  const adjustPosToAvoidTags = (str, pos) => {
+    if (!isInsideTag(str, pos)) return pos;
+    const lt = str.lastIndexOf("<", pos);
+    let p = lt > 0 ? lt - 1 : pos;
+    while (p > 0 && !/\s/.test(str.charAt(p))) p--;
+    return Math.max(1, p);
+  };
+  while (text.length > hardMax) {
+    const window = text.slice(0, hardMax);
+    let splitPos = window.lastIndexOf("\n\n");
+    if (splitPos < 0) splitPos = window.lastIndexOf("\n");
+    if (splitPos < 0) {
+      const sentenceRe = /[.!?](?=\s|$)/g;
+      let lastEnd = -1;
+      let m;
+      while (m = sentenceRe.exec(window)) {
+        lastEnd = m.index + 1;
+      }
+      if (lastEnd >= 0) splitPos = lastEnd;
+    }
+    if (splitPos < 0) splitPos = window.lastIndexOf(" ");
+    if (splitPos < 0) splitPos = hardMax;
+    splitPos = adjustPosToAvoidTags(window, splitPos);
+    const head = text.slice(0, splitPos).trimEnd();
+    chunks.push(head);
+    text = text.slice(splitPos).trimStart();
+  }
+  if (text) chunks.push(text);
+  return chunks;
+}
+function toChunks(segments, caps, logger) {
+  const INLINE_LIMIT = caps.maxInlineBreakSeconds ?? 0;
+  const renderInlineBreak = caps.renderInlineBreak ?? ((seconds) => `<break time="${seconds}s" />`);
+  const MAX_CHARS = typeof caps.maxCharsPerRequest === "number" && isFinite(caps.maxCharsPerRequest) ? Math.max(1, caps.maxCharsPerRequest - 16) : void 0;
+  const chunks = [];
+  let buffer = "";
+  let postPause = 0;
+  const flush = () => {
+    if (buffer) {
+      chunks.push({ ssml: buffer.trim(), postPause });
+      buffer = "";
+      postPause = 0;
+    }
+  };
+  for (const seg of segments) {
+    if (seg.kind === "text") {
+      const next = (buffer ? buffer + " " : "") + seg.value;
+      if (MAX_CHARS && next.length > MAX_CHARS) {
+        const parts = splitByBoundaries(next, MAX_CHARS);
+        for (let i = 0; i < parts.length - 1; i++) {
+          const part = (parts[i] ?? "").trim();
+          if (part) {
+            chunks.push({ ssml: part, postPause: 0 });
+          }
+        }
+        const tail = parts.length > 0 ? parts[parts.length - 1] : "";
+        buffer = tail ? tail : "";
+        postPause = 0;
+      } else {
+        buffer = next;
+      }
+    } else {
+      if (INLINE_LIMIT && seg.seconds <= INLINE_LIMIT) {
+        const inlineBreak = renderInlineBreak(seg.seconds);
+        buffer += ` ${inlineBreak}`;
+      } else {
+        postPause = seg.seconds;
+        flush();
+      }
+    }
+  }
+  flush();
+  logger?.debug?.("[tts] toChunks result", chunks);
+  return chunks;
+}
+
+// src/utils/debug.ts
+function buildMeta(options) {
+  return {
+    fileName: options.fileName ?? `tts_${Date.now()}.mp3`,
+    jobId: options.jobId,
+    stage: options.stage
+  };
+}
+async function saveDebugFromBuffer(config, buffer, options = {}) {
+  const sink = config.debug;
+  if (!sink?.saveBuffer) return;
+  const meta = buildMeta(options);
+  await sink.saveBuffer(buffer, meta);
+}
+async function saveDebugFromFile(config, path3, options = {}) {
+  const sink = config.debug;
+  if (!sink?.saveFile) return;
+  const meta = buildMeta(options);
+  await sink.saveFile(path3, meta);
+}
+
+// src/utils/duration.ts
+import { execa } from "execa";
+import ffmpegPath from "ffmpeg-static";
+import fs from "fs/promises";
+import path from "path";
+import { tmpdir } from "os";
+async function resolveFfprobeBin(ffmpegConfig) {
+  const candidates = [ffmpegConfig?.ffprobePath, process.env.FFPROBE_PATH, "ffprobe"].filter(
+    Boolean
+  );
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+    }
+  }
+  return candidates[candidates.length - 1] ?? "ffprobe";
+}
+async function resolveFfmpegBin(ffmpegConfig) {
+  const candidates = [
+    ffmpegConfig?.ffmpegPath,
+    process.env.FFMPEG_PATH,
+    process.env.FFMPEG_BIN
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+    }
+  }
+  if (ffmpegPath) {
+    try {
+      await fs.access(ffmpegPath);
+      return ffmpegPath;
+    } catch {
+    }
+  }
+  return "ffmpeg";
+}
+async function getAudioDuration(audioBuffer, ffmpegConfig, logger) {
+  const tempFile = path.join(tmpdir(), `tts_conductor_temp_${Date.now()}.mp3`);
+  try {
+    await fs.writeFile(tempFile, audioBuffer);
+    const ffprobeBin = await resolveFfprobeBin(ffmpegConfig);
+    const ffprobeResult = await execa(
+      ffprobeBin,
+      [
+        "-v",
+        "error",
+        "-show_entries",
+        "format=duration",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        tempFile
+      ],
+      { reject: false }
+    );
+    const probeOut = ffprobeResult.stdout?.toString().trim() ?? "";
+    const parsedProbe = parseFloat(probeOut);
+    if (!Number.isNaN(parsedProbe) && parsedProbe > 0) {
+      return Math.round(parsedProbe * 100) / 100;
+    }
+    const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
+    const ffmpegResult = await execa(ffmpegBin, ["-i", tempFile], { reject: false });
+    const stderr = ffmpegResult.stderr?.toString() ?? "";
+    const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+    if (match) {
+      const hours = parseInt(match[1] ?? "0", 10);
+      const minutes = parseInt(match[2] ?? "0", 10);
+      const seconds = parseFloat(match[3] ?? "0");
+      const total = hours * 3600 + minutes * 60 + seconds;
+      return Math.round(total * 100) / 100;
+    }
+  } catch (error) {
+    logger?.warn?.("Failed to read accurate audio duration, falling back to estimation", error);
+  } finally {
+    try {
+      await fs.unlink(tempFile);
+    } catch {
+    }
+  }
+  return estimateAudioDuration(audioBuffer);
+}
+function estimateAudioDuration(audioBuffer, bitrate = 128) {
+  return Math.round(audioBuffer.length * 8 / (bitrate * 1e3) * 100) / 100;
+}
+
 // src/utils/pause.ts
 function lookup(table, label) {
   return table[label.toUpperCase()] ?? 0;
@@ -92,209 +288,11 @@ function parseScript(input, table, logger) {
   return segments;
 }
 
-// src/utils/chunker.ts
-function splitByBoundaries(input, maxLen) {
-  const chunks = [];
-  let text = input;
-  const hardMax = Math.max(1, maxLen);
-  const isInsideTag = (str, pos) => {
-    const lastLt = str.lastIndexOf("<", pos);
-    const lastGt = str.lastIndexOf(">", pos);
-    return lastLt > lastGt;
-  };
-  const adjustPosToAvoidTags = (str, pos) => {
-    if (!isInsideTag(str, pos)) return pos;
-    const lt = str.lastIndexOf("<", pos);
-    let p = lt > 0 ? lt - 1 : pos;
-    while (p > 0 && !/\s/.test(str.charAt(p))) p--;
-    return Math.max(1, p);
-  };
-  while (text.length > hardMax) {
-    const window = text.slice(0, hardMax);
-    let splitPos = window.lastIndexOf("\n\n");
-    if (splitPos < 0) splitPos = window.lastIndexOf("\n");
-    if (splitPos < 0) {
-      const sentenceRe = /[.!?](?=\s|$)/g;
-      let lastEnd = -1;
-      let m;
-      while (m = sentenceRe.exec(window)) {
-        lastEnd = m.index + 1;
-      }
-      if (lastEnd >= 0) splitPos = lastEnd;
-    }
-    if (splitPos < 0) splitPos = window.lastIndexOf(" ");
-    if (splitPos < 0) splitPos = hardMax;
-    splitPos = adjustPosToAvoidTags(window, splitPos);
-    const head = text.slice(0, splitPos).trimEnd();
-    chunks.push(head);
-    text = text.slice(splitPos).trimStart();
-  }
-  if (text) chunks.push(text);
-  return chunks;
-}
-function toChunks(segments, caps, logger) {
-  const INLINE_LIMIT = caps.maxInlineBreakSeconds ?? 0;
-  const renderInlineBreak = caps.renderInlineBreak ?? ((seconds) => `<break time="${seconds}s" />`);
-  const MAX_CHARS = typeof caps.maxCharsPerRequest === "number" && isFinite(caps.maxCharsPerRequest) ? Math.max(1, caps.maxCharsPerRequest - 16) : void 0;
-  const chunks = [];
-  let buffer = "";
-  let postPause = 0;
-  const flush = () => {
-    if (buffer) {
-      chunks.push({ ssml: buffer.trim(), postPause });
-      buffer = "";
-      postPause = 0;
-    }
-  };
-  for (const seg of segments) {
-    if (seg.kind === "text") {
-      const next = (buffer ? buffer + " " : "") + seg.value;
-      if (MAX_CHARS && next.length > MAX_CHARS) {
-        const parts = splitByBoundaries(next, MAX_CHARS);
-        for (let i = 0; i < parts.length - 1; i++) {
-          const part = (parts[i] ?? "").trim();
-          if (part) {
-            chunks.push({ ssml: part, postPause: 0 });
-          }
-        }
-        const tail = parts.length > 0 ? parts[parts.length - 1] : "";
-        buffer = tail ? tail : "";
-        postPause = 0;
-      } else {
-        buffer = next;
-      }
-    } else {
-      if (INLINE_LIMIT && seg.seconds <= INLINE_LIMIT) {
-        const inlineBreak = renderInlineBreak(seg.seconds);
-        buffer += ` ${inlineBreak}`;
-      } else {
-        postPause = seg.seconds;
-        flush();
-      }
-    }
-  }
-  flush();
-  logger?.debug?.("[tts] toChunks result", chunks);
-  return chunks;
-}
-
-// src/utils/duration.ts
-import { execa } from "execa";
-import ffmpegPath from "ffmpeg-static";
-import fs from "fs/promises";
-import path from "path";
-import { tmpdir } from "os";
-async function resolveFfprobeBin(ffmpegConfig) {
-  const candidates = [ffmpegConfig?.ffprobePath, process.env.FFPROBE_PATH, "ffprobe"].filter(
-    Boolean
-  );
-  for (const candidate of candidates) {
-    try {
-      await fs.access(candidate);
-      return candidate;
-    } catch {
-    }
-  }
-  return candidates[candidates.length - 1] ?? "ffprobe";
-}
-async function resolveFfmpegBin(ffmpegConfig) {
-  const candidates = [
-    ffmpegConfig?.ffmpegPath,
-    process.env.FFMPEG_PATH,
-    process.env.FFMPEG_BIN
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    try {
-      await fs.access(candidate);
-      return candidate;
-    } catch {
-    }
-  }
-  if (ffmpegPath) {
-    try {
-      await fs.access(ffmpegPath);
-      return ffmpegPath;
-    } catch {
-    }
-  }
-  return "ffmpeg";
-}
-async function getAudioDuration(audioBuffer, ffmpegConfig, logger) {
-  const tempFile = path.join(tmpdir(), `tts_conductor_temp_${Date.now()}.mp3`);
-  try {
-    await fs.writeFile(tempFile, audioBuffer);
-    const ffprobeBin = await resolveFfprobeBin(ffmpegConfig);
-    const ffprobeResult = await execa(
-      ffprobeBin,
-      [
-        "-v",
-        "error",
-        "-show_entries",
-        "format=duration",
-        "-of",
-        "default=noprint_wrappers=1:nokey=1",
-        tempFile
-      ],
-      { reject: false }
-    );
-    const probeOut = ffprobeResult.stdout?.toString().trim() ?? "";
-    const parsedProbe = parseFloat(probeOut);
-    if (!Number.isNaN(parsedProbe) && parsedProbe > 0) {
-      return Math.round(parsedProbe * 100) / 100;
-    }
-    const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
-    const ffmpegResult = await execa(ffmpegBin, ["-i", tempFile], { reject: false });
-    const stderr = ffmpegResult.stderr?.toString() ?? "";
-    const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
-    if (match) {
-      const hours = parseInt(match[1] ?? "0", 10);
-      const minutes = parseInt(match[2] ?? "0", 10);
-      const seconds = parseFloat(match[3] ?? "0");
-      const total = hours * 3600 + minutes * 60 + seconds;
-      return Math.round(total * 100) / 100;
-    }
-  } catch (error) {
-    logger?.warn?.("Failed to read accurate audio duration, falling back to estimation", error);
-  } finally {
-    try {
-      await fs.unlink(tempFile);
-    } catch {
-    }
-  }
-  return estimateAudioDuration(audioBuffer);
-}
-function estimateAudioDuration(audioBuffer, bitrate = 128) {
-  return Math.round(audioBuffer.length * 8 / (bitrate * 1e3) * 100) / 100;
-}
-
 // src/utils/stitcher.ts
 import fs2 from "fs/promises";
 import path2 from "path";
 import { tmpdir as tmpdir2 } from "os";
 import { execa as execa2 } from "execa";
-
-// src/utils/debug.ts
-function buildMeta(options) {
-  return {
-    fileName: options.fileName ?? `tts_${Date.now()}.mp3`,
-    jobId: options.jobId,
-    stage: options.stage
-  };
-}
-async function saveDebugFromBuffer(config, buffer, options = {}) {
-  const sink = config.debug;
-  if (!sink?.saveBuffer) return;
-  const meta = buildMeta(options);
-  await sink.saveBuffer(buffer, meta);
-}
-async function saveDebugFromFile(config, path3, options = {}) {
-  const sink = config.debug;
-  if (!sink?.saveFile) return;
-  const meta = buildMeta(options);
-  await sink.saveFile(path3, meta);
-}
-
-// src/utils/stitcher.ts
 var silenceCache = /* @__PURE__ */ new Map();
 var MAX_SILENCE_CACHE_SIZE = 50;
 async function resolveFfmpegBin2(ffmpegConfig) {
@@ -517,7 +515,7 @@ function withTimeout(promise, ms, label) {
 }
 async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
   const logger = config.logger;
-  const providerId = provider.id ?? "provider";
+  const providerId = provider.id;
   const segments = parseScript(rawText, config.pauses, logger);
   logger?.info?.("[tts] Parsed segments", { count: segments.length });
   const chunks = toChunks(segments, provider.caps, logger);
@@ -534,7 +532,7 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
     });
     onProgress?.(Math.min(10, Math.round((i + 1) / chunks.length * 10)));
     const res = await withTimeout(provider.generate(input), 6e4, `provider.generate chunk ${i}`);
-    const duration = await getAudioDuration(res.audio, config.ffmpeg, logger);
+    const duration = res.duration ?? await getAudioDuration(res.audio, config.ffmpeg, logger);
     audioParts.push({ buffer: res.audio, duration });
     done++;
     await saveDebugFromBuffer(config, res.audio, {
@@ -564,9 +562,17 @@ var TtsConductor = class {
   get runtimeConfig() {
     return this.config;
   }
+  /**
+   * Register a provider factory with type-safe options.
+   * Provider must be registered in the TtsProviderRegistry via module augmentation.
+   */
   registerProvider(factory) {
-    this.providers.set(factory.id, factory);
+    this.providers.set(factory.id, {
+      id: factory.id,
+      create: factory.create
+    });
     this.config.logger?.debug?.("Registered provider", factory.id);
+    return factory.id;
   }
   hasProvider(id) {
     return this.providers.has(id);
@@ -574,13 +580,17 @@ var TtsConductor = class {
   listProviders() {
     return Array.from(this.providers.keys());
   }
+  /**
+   * Create a provider instance with type-safe options.
+   * Provider must be registered in the TtsProviderRegistry via module augmentation.
+   */
   createProvider(id, options) {
     const factory = this.providers.get(id);
     if (!factory) {
       throw new Error(`Provider '${id}' is not registered`);
     }
     this.config.logger?.info?.("Creating provider instance", id, { options });
-    return factory.create({ config: this.config }, options);
+    return factory.create({ config: this.config, id: factory.id }, options);
   }
   async generateFull(rawText, provider, onProgress, options) {
     return ttsGenerateFull(rawText, provider, this.config, onProgress, options);

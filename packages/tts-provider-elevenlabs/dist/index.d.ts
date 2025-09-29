@@ -14,6 +14,11 @@ interface ElevenLabsProviderOptions {
     voiceSettings?: ElevenLabsVoiceSettings;
     quality?: ElevenLabsQuality;
 }
-declare const elevenLabsProviderFactory: TtsProviderFactory<ElevenLabsProviderOptions>;
+declare module '@tts-conductor/core' {
+    interface TtsProviderRegistry {
+        '11labs': ElevenLabsProviderOptions;
+    }
+}
+declare const elevenLabsProviderFactory: TtsProviderFactory<'11labs'>;
 
 export { type ElevenLabsProviderOptions, type ElevenLabsQuality, type ElevenLabsVoiceSettings, elevenLabsProviderFactory };

@@ -45,7 +45,7 @@ function createContext(overrides: Partial<TtsRuntimeConfig> = {}): {
   };
 
   return {
-    context: { config },
+    context: { config, id: '11labs' },
     logger: config.logger!,
   };
 }
