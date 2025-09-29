@@ -32,10 +32,11 @@
     "@vitest/coverage-v8": "^3.2.4",
     "eslint": "^9.36.0",
     "eslint-config-prettier": "^10.1.8",
+    "eslint-config-turbo": "^2.5.8",
     "husky": "^9.1.7",
     "prettier": "^3.6.2",
     "tsup": "^8.5.0",
-    "turbo": "^1.13.4",
+    "turbo": "^2.5.8",
     "typescript": "^5.9.2",
     "typescript-eslint": "^8.45.0",
     "vitest": "^3.2.4"

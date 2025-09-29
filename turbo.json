@@ -1,6 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "pipeline": {
+  "globalEnv": ["FFPROBE_PATH", "FFMPEG_PATH", "FFMPEG_BIN"],
+  "tasks": {
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**", "lib/**"],
@@ -15,6 +16,9 @@
       "outputs": []
     },
     "test": {
+      "dependsOn": ["^build"]
+    },
+    "test:coverage": {
       "dependsOn": ["^build"],
       "outputs": ["coverage/**"]
     },
