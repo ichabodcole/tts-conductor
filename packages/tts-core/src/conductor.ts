@@ -7,6 +7,7 @@ import type {
 } from './factory';
 import { ttsGenerateFull } from './operations';
 import type { TtsProvider } from './provider';
+import type { BuildFinalAudioResult } from './utils/stitcher';
 
 // Use a more flexible approach - store the factory with minimal typing
 interface StoredFactory {
@@ -65,7 +66,7 @@ export class TtsConductor {
     provider: TtsProvider,
     onProgress?: (percent: number) => void,
     options?: BuildAudioOptions,
-  ) {
+  ): Promise<BuildFinalAudioResult> {
     return ttsGenerateFull(rawText, provider, this.config, onProgress, options);
   }
 }
