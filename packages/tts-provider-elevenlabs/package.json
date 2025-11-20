@@ -11,19 +11,19 @@
   "type": "module",
   "exports": {
     ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
     }
   },
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsup",
-    "clean": "tsup --clean",
-    "dev": "tsup --watch",
+    "build": "tsdown",
+    "clean": "tsdown --clean",
+    "dev": "tsdown --watch",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest --run --config ../../vitest.config.ts",
     "typecheck": "tsc --noEmit"

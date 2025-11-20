@@ -36,7 +36,7 @@ declare module '@tts-conductor/core' {
 const CAPS: ProviderCapabilities = {
   maxInlineBreakSeconds: 3,
   maxCharsPerRequest: 1200,
-  renderInlineBreak: (seconds) => `<break time="${seconds}s" />`,
+  renderInlineBreak: (seconds: number) => `<break time="${seconds}s" />`,
 };
 
 class ElevenLabsProvider implements TtsProvider {

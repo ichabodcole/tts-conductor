@@ -1,4 +1,4 @@
-import { defineConfig } from 'tsup';
+import { defineConfig } from 'tsdown';
 
 export default defineConfig({
   entry: ['src/index.ts'],
@@ -8,5 +8,4 @@ export default defineConfig({
   clean: true,
   outDir: 'dist',
   target: 'node18',
-  external: ['@tts-conductor/core'],
 });
