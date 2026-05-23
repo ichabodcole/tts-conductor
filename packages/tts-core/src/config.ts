@@ -31,12 +31,41 @@ export interface FfmpegConfig {
   ffprobePath?: string;
 }
 
+/**
+ * Per-conductor timeout overrides (all values in milliseconds). Any field left
+ * undefined falls back to the corresponding value in
+ * {@link DEFAULT_TIMEOUTS}. Defaults are conservative for ElevenLabs at
+ * typical chunk sizes; long segments, slow upstream days, or larger chunk
+ * budgets may want higher values.
+ */
+export interface TtsTimeouts {
+  /** Per-chunk `provider.generate()` wrapping timeout. */
+  generate?: number;
+  /** Per-chunk ffmpeg transcode (MP3 → intermediate WAV). */
+  transcode?: number;
+  /** Silence-WAV generation (cached after first build per duration). */
+  silenceGen?: number;
+  /** Concat-demuxer concatenation (fast path). */
+  concat?: number;
+  /** Filter-graph concat fallback (slower, re-encodes from scratch). */
+  concatFilterFallback?: number;
+  /** Final MP3 encode. */
+  finalEncode?: number;
+  /** Outer wrap around the entire `buildFinalAudio` orchestration. */
+  stitch?: number;
+}
+
 export interface TtsRuntimeConfig {
   /** Map of pause labels (e.g. FULL_BREATH) to seconds */
   pauses: Record<string, number>;
   logger?: TtsLogger;
   debug?: DebugSink;
   ffmpeg?: FfmpegConfig;
+  /**
+   * Per-conductor timeout overrides. Any field left undefined falls back to
+   * `DEFAULT_TIMEOUTS`. See {@link TtsTimeouts}.
+   */
+  timeouts?: TtsTimeouts;
 }
 
 export interface BuildAudioOptions {

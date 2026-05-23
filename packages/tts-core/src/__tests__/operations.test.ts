@@ -132,6 +132,37 @@ describe('ttsGenerateFull', () => {
     await expectation;
   });
 
+  it('uses per-conductor timeouts.generate override when supplied', async () => {
+    const slowProvider: TtsProvider = {
+      id: 'slow-provider',
+      caps: provider.caps,
+      generate: () =>
+        new Promise<GenerationResult>((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                audio: Buffer.from('late'),
+                duration: 1,
+              }),
+            5_000,
+          ),
+        ),
+    };
+
+    // Custom timeout is 1s — well under the 60s default. Provider takes 5s.
+    const configWithCustomTimeout: TtsRuntimeConfig = {
+      ...runtimeConfig,
+      timeouts: { generate: 1_000 },
+    };
+    const promise = ttsGenerateFull('Hello', slowProvider, configWithCustomTimeout);
+    const expectation = expect(promise).rejects.toThrow(
+      '[tts] Timeout after 1000ms during provider.generate chunk 0',
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expectation;
+  });
+
   it('trusts provider-supplied duration without calling ffprobe', async () => {
     const providerWithDuration: TtsProvider = {
       id: 'fast-provider',

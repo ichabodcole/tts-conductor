@@ -1,5 +1,6 @@
 import type { BuildAudioOptions, TtsRuntimeConfig } from './config';
 import { ProcessStage } from './config';
+import { DEFAULT_TIMEOUTS } from './defaults';
 import { TtsTransientError } from './errors';
 import type { TtsProvider } from './provider';
 import type { Chunk } from './utils/chunker';
@@ -38,6 +39,12 @@ export async function ttsGenerateFull(
   // cancelled (e.g., BullMQ job killed before we started).
   const signal = options?.signal;
   signal?.throwIfAborted();
+
+  // Resolve timeouts once for the orchestration scope so the rest of the
+  // function reads primitive numbers, matching the pattern used inside
+  // buildFinalAudio. This avoids two timeout-resolution styles drifting
+  // apart as more keys are added (config-sweep convention).
+  const timeouts = { ...DEFAULT_TIMEOUTS, ...(config.timeouts ?? {}) };
 
   // Per-call pause table overrides the runtime-config pause table when supplied
   // (A1: multi-tenant pause vocabulary without per-tenant conductors).
@@ -79,7 +86,7 @@ export async function ttsGenerateFull(
 
     const res = await withTimeout(
       provider.generate(input, { signal }),
-      60000,
+      timeouts.generate,
       `provider.generate chunk ${i}`,
     );
 
@@ -103,7 +110,7 @@ export async function ttsGenerateFull(
   onProgress?.(80);
   const final = await withTimeout(
     buildFinalAudio(config, chunks, audioParts, undefined, options),
-    45000,
+    timeouts.stitch,
     'stitcher.buildFinalAudio',
   );
   onProgress?.(100);

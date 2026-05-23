@@ -75,9 +75,61 @@ declare module '@tts-conductor/core' {
   }
 }
 
-const CAPS: ProviderCapabilities = {
-  maxInlineBreakSeconds: 3,
+/**
+ * ElevenLabs adapter defaults. These are the values the adapter reports to the
+ * orchestrator and uses in SDK calls when the consumer doesn't override them.
+ *
+ * Consumer-configurable knobs (per-call overrides via `ElevenLabsCallOverrides`
+ * or `BuildAudioOptions`):
+ *   - voiceId, voiceSettings, quality (via overrides)
+ *   - maxCharsPerRequest (via BuildAudioOptions.maxCharsPerRequest)
+ *
+ * Currently fixed (will become configurable when output-format config lands):
+ *   - DEFAULT_OUTPUT_FORMAT — `mp3_44100_128` is ElevenLabs' standard MP3 at
+ *     128kbps / 44.1kHz mono. Matches what the core stitcher's intermediate
+ *     pipeline assumes (44.1kHz mono).
+ *
+ * Provider-shape (not appropriate to make per-call configurable):
+ *   - DEFAULT_MAX_INLINE_BREAK_SECONDS — informs the chunker about ElevenLabs'
+ *     `<break time="Xs"/>` upper bound.
+ *   - MODEL_IDS — the actual SDK model identifiers per quality tier.
+ */
+export const ELEVENLABS_DEFAULTS = {
+  /**
+   * Default per-request character budget reported via `caps.maxCharsPerRequest`.
+   * ElevenLabs' actual server limit is higher (~5000), but a smaller default
+   * gives better latency / progress granularity for typical narration workloads.
+   * Consumers tuning for throughput can override via
+   * {@link BuildAudioOptions.maxCharsPerRequest}.
+   */
   maxCharsPerRequest: 1200,
+  /**
+   * Maximum length of an inline `<break time="Xs"/>` tag the adapter promises
+   * to handle correctly. Longer pauses get rendered as separate silence
+   * segments by the core orchestrator.
+   */
+  maxInlineBreakSeconds: 3,
+  /**
+   * Default output format string passed to `textToSpeech.convert`. MP3 at
+   * 44.1kHz / 128kbps — matches the core's intermediate-audio pipeline.
+   */
+  outputFormat: 'mp3_44100_128' as const,
+  /**
+   * Quality-tier → SDK model ID mapping. `high` deliberately maps to the same
+   * model as `standard` because `eleven_multilingual_v2` is the highest-quality
+   * model ElevenLabs currently exposes for this use case; `draft` swaps to the
+   * faster turbo model.
+   */
+  models: {
+    draft: 'eleven_turbo_v2_5',
+    standard: 'eleven_multilingual_v2',
+    high: 'eleven_multilingual_v2',
+  } as const satisfies Record<ElevenLabsQuality, string>,
+};
+
+const CAPS: ProviderCapabilities = {
+  maxInlineBreakSeconds: ELEVENLABS_DEFAULTS.maxInlineBreakSeconds,
+  maxCharsPerRequest: ELEVENLABS_DEFAULTS.maxCharsPerRequest,
   renderInlineBreak: (seconds: number) => `<break time="${seconds}s" />`,
 };
 
@@ -110,16 +162,10 @@ class ElevenLabsProvider implements TtsProvider<ElevenLabsCallOverrides> {
     const voiceSettings = overrides?.voiceSettings ?? this.options.voiceSettings;
     const logger = this.ctx.config.logger;
 
-    const modelMap: Record<ElevenLabsQuality, string> = {
-      draft: 'eleven_turbo_v2_5',
-      standard: 'eleven_multilingual_v2',
-      high: 'eleven_multilingual_v2',
-    };
-
     const convertOptions: ElevenLabsTypes.BodyTextToSpeechFull = {
       text: chunk,
-      outputFormat: 'mp3_44100_128',
-      modelId: modelMap[quality] ?? modelMap.standard,
+      outputFormat: ELEVENLABS_DEFAULTS.outputFormat,
+      modelId: ELEVENLABS_DEFAULTS.models[quality] ?? ELEVENLABS_DEFAULTS.models.standard,
     };
 
     if (voiceSettings) {

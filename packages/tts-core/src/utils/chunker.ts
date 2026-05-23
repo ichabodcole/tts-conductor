@@ -1,4 +1,5 @@
 import type { TtsLogger } from '../config';
+import { SSML_RESERVE_CHARS } from '../defaults';
 import type { ProviderCapabilities } from '../provider';
 import type { Segment } from './segmenter';
 
@@ -63,7 +64,7 @@ export function toChunks(
     caps.renderInlineBreak ?? ((seconds: number) => `<break time="${seconds}s" />`);
   const MAX_CHARS =
     typeof caps.maxCharsPerRequest === 'number' && Number.isFinite(caps.maxCharsPerRequest)
-      ? Math.max(1, caps.maxCharsPerRequest - 16)
+      ? Math.max(1, caps.maxCharsPerRequest - SSML_RESERVE_CHARS)
       : undefined;
 
   const chunks: Chunk[] = [];

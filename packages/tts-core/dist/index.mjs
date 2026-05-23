@@ -14,6 +14,69 @@ let ProcessStage = /* @__PURE__ */ function(ProcessStage) {
 	return ProcessStage;
 }({});
 //#endregion
+//#region src/defaults.ts
+const DEFAULT_PAUSE_TABLE = {
+	MICRO: .5,
+	SHORT: 1.5,
+	MEDIUM: 3.5,
+	LONG: 8,
+	FULL_BREATH: 5,
+	HALF_BREATH: 3,
+	SETTLE: 10,
+	BREATH: 5
+};
+/**
+* Default timeouts (milliseconds) for each waited operation in the orchestration
+* pipeline. Consumers can override any subset of these via
+* {@link TtsRuntimeConfig.timeouts}; whatever they don't supply falls back here.
+*
+* Values reflect what the library historically hardcoded and have proven
+* reasonable in production for ElevenLabs at typical chunk sizes (~1200 chars).
+* Long segments, slow upstream days, or larger chunk budgets may want higher
+* values — that's exactly what the override surface is for.
+*/
+const DEFAULT_TIMEOUTS = {
+	/** Per-chunk provider.generate() wrapping timeout (entire upstream call). */
+	generate: 6e4,
+	/** Per-chunk ffmpeg transcode (MP3 → intermediate WAV). */
+	transcode: 3e4,
+	/** Silence-WAV generation (cached after first build per duration). */
+	silenceGen: 3e4,
+	/** Concat-demuxer concatenation (fast path). */
+	concat: 45e3,
+	/** Filter-graph concat fallback (slower, re-encodes from scratch). */
+	concatFilterFallback: 6e4,
+	/** Final MP3 encode. */
+	finalEncode: 45e3,
+	/** Outer wrap around buildFinalAudio inside the orchestration. */
+	stitch: 45e3
+};
+/**
+* Internal intermediate-audio pipeline parameters. These are NOT user-configurable
+* because they're chosen to make ffmpeg's concat demuxer behave reliably —
+* mismatched sample rates or codecs between intermediate parts cause crackling
+* or hard concat failures. The pipeline does MP3 → 44.1kHz mono pcm_s16le WAV →
+* concat → final-output-format.
+*
+* The final output format is a separate concern (see {@link DEFAULT_OUTPUT_FORMAT})
+* and is targeted for per-call configurability in a follow-up.
+*/
+const INTERMEDIATE_AUDIO = {
+	sampleRateHz: 44100,
+	channels: 1,
+	codec: "pcm_s16le"
+};
+/**
+* Default final-output format. Currently hardcoded at the stitcher; a future
+* per-call output config will let consumers pick Opus/FLAC/variable bitrates.
+*/
+const DEFAULT_OUTPUT_FORMAT = {
+	codec: "libmp3lame",
+	bitrate: "192k",
+	sampleRateHz: 44100,
+	channels: 1
+};
+//#endregion
 //#region src/errors.ts
 /**
 * Error hierarchy for TTS provider failures. Adapters convert SDK-specific errors
@@ -365,6 +428,11 @@ function parseScript(input, table, logger) {
 }
 //#endregion
 //#region src/utils/stitcher.ts
+const INTER_SAMPLE_RATE_STR = String(INTERMEDIATE_AUDIO.sampleRateHz);
+const INTER_CHANNELS_STR = String(INTERMEDIATE_AUDIO.channels);
+const INTER_CODEC = INTERMEDIATE_AUDIO.codec;
+const INTER_CHANNEL_LAYOUT = INTERMEDIATE_AUDIO.channels === 1 ? "mono" : "stereo";
+const INTER_SAMPLE_FMT = "s16";
 const silenceCache = /* @__PURE__ */ new Map();
 const MAX_SILENCE_CACHE_SIZE = 50;
 async function resolveFfmpegBin(ffmpegConfig) {
@@ -384,7 +452,7 @@ async function resolveFfmpegBin(ffmpegConfig) {
 	} catch {}
 	return "ffmpeg";
 }
-async function genSilenceWav(seconds, ffmpegConfig, logger, signal) {
+async function genSilenceWav(seconds, ffmpegConfig, logger, signal, timeoutMs = DEFAULT_TIMEOUTS.silenceGen) {
 	if (silenceCache.has(seconds)) return silenceCache.get(seconds);
 	const out = path.join(tmpdir(), `tts_conductor_silence_${seconds}.wav`);
 	const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
@@ -393,19 +461,19 @@ async function genSilenceWav(seconds, ffmpegConfig, logger, signal) {
 			"-f",
 			"lavfi",
 			"-i",
-			`anullsrc=r=44100:cl=mono`,
+			`anullsrc=r=${INTERMEDIATE_AUDIO.sampleRateHz}:cl=${INTER_CHANNEL_LAYOUT}`,
 			"-t",
 			seconds.toString(),
 			"-ac",
-			"1",
+			INTER_CHANNELS_STR,
 			"-ar",
-			"44100",
+			INTER_SAMPLE_RATE_STR,
 			"-c:a",
-			"pcm_s16le",
+			INTER_CODEC,
 			"-y",
 			out
 		], {
-			timeout: 3e4,
+			timeout: timeoutMs,
 			cancelSignal: signal
 		});
 	} catch (error) {
@@ -429,7 +497,7 @@ async function genSilenceWav(seconds, ffmpegConfig, logger, signal) {
 	silenceCache.set(seconds, out);
 	return out;
 }
-async function concatParts(fileList, outPath, ffmpegConfig, logger, signal) {
+async function concatParts(fileList, outPath, ffmpegConfig, logger, signal, concatTimeoutMs = DEFAULT_TIMEOUTS.concat, filterFallbackTimeoutMs = DEFAULT_TIMEOUTS.concatFilterFallback) {
 	const listFile = path.join(tmpdir(), `tts_conductor_concat_${Date.now()}.txt`);
 	try {
 		await fs.writeFile(listFile, fileList.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
@@ -443,15 +511,15 @@ async function concatParts(fileList, outPath, ffmpegConfig, logger, signal) {
 				"-i",
 				listFile,
 				"-c:a",
-				"pcm_s16le",
+				INTER_CODEC,
 				"-ar",
-				"44100",
+				INTER_SAMPLE_RATE_STR,
 				"-ac",
-				"1",
+				INTER_CHANNELS_STR,
 				"-y",
 				outPath
 			], {
-				timeout: 45e3,
+				timeout: concatTimeoutMs,
 				cancelSignal: signal
 			});
 			return;
@@ -461,10 +529,10 @@ async function concatParts(fileList, outPath, ffmpegConfig, logger, signal) {
 			const args = [];
 			for (const file of fileList) args.push("-i", file);
 			const n = fileList.length;
-			const filter = `${Array.from({ length: n }, (_, i) => `[${i}:a]`).join("")}concat=n=${n}:v=0:a=1, aformat=sample_fmts=s16:sample_rates=44100:channel_layouts=mono [a]`;
-			args.push("-filter_complex", filter, "-map", "[a]", "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "1", "-y", outPath);
+			const filter = `${Array.from({ length: n }, (_, i) => `[${i}:a]`).join("")}concat=n=${n}:v=0:a=1, aformat=sample_fmts=${INTER_SAMPLE_FMT}:sample_rates=${INTERMEDIATE_AUDIO.sampleRateHz}:channel_layouts=${INTER_CHANNEL_LAYOUT} [a]`;
+			args.push("-filter_complex", filter, "-map", "[a]", "-c:a", INTER_CODEC, "-ar", INTER_SAMPLE_RATE_STR, "-ac", INTER_CHANNELS_STR, "-y", outPath);
 			await execa(ffmpegBin, args, {
-				timeout: 6e4,
+				timeout: filterFallbackTimeoutMs,
 				cancelSignal: signal
 			});
 		}
@@ -481,6 +549,10 @@ async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now
 	const logger = config.logger;
 	const ffmpegConfig = config.ffmpeg;
 	const signal = options?.signal;
+	const timeouts = {
+		...DEFAULT_TIMEOUTS,
+		...config.timeouts ?? {}
+	};
 	const tmp = tmpdir();
 	const partFiles = [];
 	const tempFilesToCleanup = [];
@@ -497,44 +569,46 @@ async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now
 				"-i",
 				speechMp3,
 				"-ar",
-				"44100",
+				INTER_SAMPLE_RATE_STR,
 				"-ac",
-				"1",
+				INTER_CHANNELS_STR,
 				"-c:a",
-				"pcm_s16le",
+				INTER_CODEC,
 				"-y",
 				speechWav
 			], {
-				timeout: 3e4,
+				timeout: timeouts.transcode,
 				cancelSignal: signal
 			});
 			partFiles.push(speechWav);
 			tempFilesToCleanup.push(speechWav);
 			const pauseSeconds = chunks[i]?.postPause ?? 0;
 			if (pauseSeconds > 0) {
-				const silenceFile = await genSilenceWav(pauseSeconds, ffmpegConfig, logger, signal);
+				const silenceFile = await genSilenceWav(pauseSeconds, ffmpegConfig, logger, signal, timeouts.silenceGen);
 				partFiles.push(silenceFile);
 			}
 		}
 		signal?.throwIfAborted();
 		const outWavPath = path.join(tmp, `tts_concat_${Date.now()}.wav`);
 		tempFilesToCleanup.push(outWavPath);
-		await concatParts(partFiles, outWavPath, ffmpegConfig, logger, signal);
+		await concatParts(partFiles, outWavPath, ffmpegConfig, logger, signal, timeouts.concat, timeouts.concatFilterFallback);
 		const outPath = path.join(tmp, fileName);
 		tempFilesToCleanup.push(outPath);
 		await execa(ffmpegBin, [
 			"-i",
 			outWavPath,
 			"-c:a",
-			"libmp3lame",
+			DEFAULT_OUTPUT_FORMAT.codec,
 			"-ar",
-			"44100",
+			String(DEFAULT_OUTPUT_FORMAT.sampleRateHz),
+			"-ac",
+			String(DEFAULT_OUTPUT_FORMAT.channels),
 			"-b:a",
-			"192k",
+			DEFAULT_OUTPUT_FORMAT.bitrate,
 			"-y",
 			outPath
 		], {
-			timeout: 45e3,
+			timeout: timeouts.finalEncode,
 			cancelSignal: signal
 		});
 		await saveDebugFromFile(config, outPath, {
@@ -586,6 +660,10 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 	const providerId = provider.id;
 	const signal = options?.signal;
 	signal?.throwIfAborted();
+	const timeouts = {
+		...DEFAULT_TIMEOUTS,
+		...config.timeouts ?? {}
+	};
 	const segments = parseScript(rawText, options?.pauses ?? config.pauses, logger);
 	logger?.info?.("[tts] Parsed segments", { count: segments.length });
 	const callCap = options?.maxCharsPerRequest;
@@ -606,7 +684,7 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 			postPause: chunk.postPause
 		});
 		onProgress?.(Math.min(10, Math.round((i + 1) / chunks.length * 10)));
-		const res = await withTimeout(provider.generate(input, { signal }), 6e4, `provider.generate chunk ${i}`);
+		const res = await withTimeout(provider.generate(input, { signal }), timeouts.generate, `provider.generate chunk ${i}`);
 		const duration = res.duration ?? await getAudioDuration(res.audio, config.ffmpeg, logger, signal);
 		audioParts.push({
 			buffer: res.audio,
@@ -622,7 +700,7 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 		onProgress?.(chunkProgress);
 	}
 	onProgress?.(80);
-	const final = await withTimeout(buildFinalAudio(config, chunks, audioParts, void 0, options), 45e3, "stitcher.buildFinalAudio");
+	const final = await withTimeout(buildFinalAudio(config, chunks, audioParts, void 0, options), timeouts.stitch, "stitcher.buildFinalAudio");
 	onProgress?.(100);
 	return final;
 }
@@ -675,18 +753,6 @@ function createTtsConductor(config) {
 	return new TtsConductor(config);
 }
 //#endregion
-//#region src/defaults.ts
-const DEFAULT_PAUSE_TABLE = {
-	MICRO: .5,
-	SHORT: 1.5,
-	MEDIUM: 3.5,
-	LONG: 8,
-	FULL_BREATH: 5,
-	HALF_BREATH: 3,
-	SETTLE: 10,
-	BREATH: 5
-};
-//#endregion
-export { DEFAULT_PAUSE_TABLE, ProcessStage, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, TtsQuotaExceededError, TtsRateLimitError, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
+export { DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS, ProcessStage, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, TtsQuotaExceededError, TtsRateLimitError, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
 
 //# sourceMappingURL=index.mjs.map

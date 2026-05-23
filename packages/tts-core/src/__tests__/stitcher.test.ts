@@ -103,6 +103,66 @@ describe('buildFinalAudio', () => {
     }
   });
 
+  it('uses DEFAULT_TIMEOUTS when config.timeouts is omitted (config sweep)', async () => {
+    const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+    const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+    await buildFinalAudio(config, chunks, audio, 'test.mp3');
+
+    // Pulls every execa's timeout option and checks they match the documented
+    // defaults. Catches drift if DEFAULT_TIMEOUTS values are accidentally changed.
+    const calls = getExecaMock().mock.calls;
+    const timeouts = calls.map((c) => (c[2] as { timeout?: number } | undefined)?.timeout);
+    // Expected timeouts in order: transcode (30s), concat (45s), finalEncode (45s).
+    expect(timeouts).toEqual([30_000, 45_000, 45_000]);
+  });
+
+  it('uses config.timeouts overrides when supplied (config sweep)', async () => {
+    const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+    const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+    const customConfig = {
+      ...config,
+      timeouts: { transcode: 7_777, concat: 8_888, finalEncode: 9_999 },
+    };
+
+    await buildFinalAudio(customConfig, chunks, audio, 'test.mp3');
+
+    const calls = getExecaMock().mock.calls;
+    const timeouts = calls.map((c) => (c[2] as { timeout?: number } | undefined)?.timeout);
+    expect(timeouts).toEqual([7_777, 8_888, 9_999]);
+  });
+
+  it('falls back to DEFAULT_TIMEOUTS for any field not overridden (partial override)', async () => {
+    const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+    const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+    // Override only `transcode`. concat and finalEncode must still pull from
+    // DEFAULT_TIMEOUTS — guards against a regression where partial overrides
+    // accidentally zero out the rest (e.g., if merge-once order flipped).
+    const customConfig = { ...config, timeouts: { transcode: 4_242 } };
+
+    await buildFinalAudio(customConfig, chunks, audio, 'test.mp3');
+
+    const calls = getExecaMock().mock.calls;
+    const timeouts = calls.map((c) => (c[2] as { timeout?: number } | undefined)?.timeout);
+    // transcode=4242 (override), concat=45000 (default), finalEncode=45000 (default)
+    expect(timeouts).toEqual([4_242, 45_000, 45_000]);
+  });
+
+  it('includes -ac in the final encode args so DEFAULT_OUTPUT_FORMAT.channels is honored', async () => {
+    const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+    const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+    await buildFinalAudio(config, chunks, audio, 'test.mp3');
+
+    // The last execa call is the final MP3 encode. Verify -ac is present
+    // alongside -ar and -b:a so DEFAULT_OUTPUT_FORMAT.channels is actually
+    // forwarded to ffmpeg (regression guard for the post-review fix).
+    const calls = getExecaMock().mock.calls;
+    const finalCall = calls[calls.length - 1];
+    const args = (finalCall?.[1] as string[]) ?? [];
+    expect(args).toContain('-ac');
+  });
+
   it('reuses cached silence files for identical pause durations', async () => {
     const chunks: Chunk[] = [
       { ssml: 'Hello', postPause: 2 },

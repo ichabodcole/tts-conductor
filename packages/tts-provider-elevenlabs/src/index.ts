@@ -1,4 +1,5 @@
 export {
+  ELEVENLABS_DEFAULTS,
   type ElevenLabsCallOverrides,
   type ElevenLabsProviderOptions,
   type ElevenLabsQuality,

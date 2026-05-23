@@ -27,12 +27,40 @@ interface FfmpegConfig {
   ffmpegPath?: string;
   ffprobePath?: string;
 }
+/**
+ * Per-conductor timeout overrides (all values in milliseconds). Any field left
+ * undefined falls back to the corresponding value in
+ * {@link DEFAULT_TIMEOUTS}. Defaults are conservative for ElevenLabs at
+ * typical chunk sizes; long segments, slow upstream days, or larger chunk
+ * budgets may want higher values.
+ */
+interface TtsTimeouts {
+  /** Per-chunk `provider.generate()` wrapping timeout. */
+  generate?: number;
+  /** Per-chunk ffmpeg transcode (MP3 → intermediate WAV). */
+  transcode?: number;
+  /** Silence-WAV generation (cached after first build per duration). */
+  silenceGen?: number;
+  /** Concat-demuxer concatenation (fast path). */
+  concat?: number;
+  /** Filter-graph concat fallback (slower, re-encodes from scratch). */
+  concatFilterFallback?: number;
+  /** Final MP3 encode. */
+  finalEncode?: number;
+  /** Outer wrap around the entire `buildFinalAudio` orchestration. */
+  stitch?: number;
+}
 interface TtsRuntimeConfig {
   /** Map of pause labels (e.g. FULL_BREATH) to seconds */
   pauses: Record<string, number>;
   logger?: TtsLogger;
   debug?: DebugSink;
   ffmpeg?: FfmpegConfig;
+  /**
+   * Per-conductor timeout overrides. Any field left undefined falls back to
+   * `DEFAULT_TIMEOUTS`. See {@link TtsTimeouts}.
+   */
+  timeouts?: TtsTimeouts;
 }
 interface BuildAudioOptions {
   debugJobId?: string;
@@ -267,6 +295,35 @@ declare function createTtsConductor(config: TtsRuntimeConfig): TtsConductor;
 //#endregion
 //#region src/defaults.d.ts
 declare const DEFAULT_PAUSE_TABLE: PauseTable;
+/**
+ * Default timeouts (milliseconds) for each waited operation in the orchestration
+ * pipeline. Consumers can override any subset of these via
+ * {@link TtsRuntimeConfig.timeouts}; whatever they don't supply falls back here.
+ *
+ * Values reflect what the library historically hardcoded and have proven
+ * reasonable in production for ElevenLabs at typical chunk sizes (~1200 chars).
+ * Long segments, slow upstream days, or larger chunk budgets may want higher
+ * values — that's exactly what the override surface is for.
+ */
+declare const DEFAULT_TIMEOUTS: {
+  /** Per-chunk provider.generate() wrapping timeout (entire upstream call). */readonly generate: 60000; /** Per-chunk ffmpeg transcode (MP3 → intermediate WAV). */
+  readonly transcode: 30000; /** Silence-WAV generation (cached after first build per duration). */
+  readonly silenceGen: 30000; /** Concat-demuxer concatenation (fast path). */
+  readonly concat: 45000; /** Filter-graph concat fallback (slower, re-encodes from scratch). */
+  readonly concatFilterFallback: 60000; /** Final MP3 encode. */
+  readonly finalEncode: 45000; /** Outer wrap around buildFinalAudio inside the orchestration. */
+  readonly stitch: 45000;
+};
+/**
+ * Default final-output format. Currently hardcoded at the stitcher; a future
+ * per-call output config will let consumers pick Opus/FLAC/variable bitrates.
+ */
+declare const DEFAULT_OUTPUT_FORMAT: {
+  readonly codec: "libmp3lame";
+  readonly bitrate: "192k";
+  readonly sampleRateHz: 44100;
+  readonly channels: 1;
+};
 //#endregion
 //#region src/errors.d.ts
 /**
@@ -364,5 +421,5 @@ declare function ttsGenerateFull(rawText: string, provider: TtsProvider, config:
 declare function getAudioDuration(audioBuffer: Buffer, ffmpegConfig?: FfmpegConfig, logger?: TtsLogger, signal?: AbortSignal): Promise<number>;
 declare function estimateAudioDuration(audioBuffer: Buffer, bitrate?: number): number;
 //#endregion
-export { type BuildAudioOptions, type BuildFinalAudioResult, type CallOverridesFor, DEFAULT_PAUSE_TABLE, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerateCallOptions, type GenerationResult, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, type TtsLogger, type TtsProvider, type TtsProviderCallOverridesRegistry, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, TtsQuotaExceededError, TtsRateLimitError, type TtsRuntimeConfig, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
+export { type BuildAudioOptions, type BuildFinalAudioResult, type CallOverridesFor, DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerateCallOptions, type GenerationResult, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, type TtsLogger, type TtsProvider, type TtsProviderCallOverridesRegistry, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, TtsQuotaExceededError, TtsRateLimitError, type TtsRuntimeConfig, type TtsTimeouts, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
 //# sourceMappingURL=index.d.mts.map

@@ -6,9 +6,10 @@ export type {
   FfmpegConfig,
   TtsLogger,
   TtsRuntimeConfig,
+  TtsTimeouts,
 } from './config';
 export { ProcessStage } from './config';
-export { DEFAULT_PAUSE_TABLE } from './defaults';
+export { DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS } from './defaults';
 export {
   TtsAuthenticationError,
   TtsError,

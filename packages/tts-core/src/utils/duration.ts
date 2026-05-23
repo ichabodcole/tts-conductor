@@ -4,6 +4,7 @@ import path from 'node:path';
 import { execa } from 'execa';
 import ffmpegPath from 'ffmpeg-static';
 import type { FfmpegConfig, TtsLogger } from '../config';
+import { DEFAULT_ESTIMATED_BITRATE_KBPS } from '../defaults';
 
 async function resolveFfprobeBin(ffmpegConfig?: FfmpegConfig): Promise<string> {
   const candidates = [ffmpegConfig?.ffprobePath, process.env.FFPROBE_PATH, 'ffprobe'].filter(
@@ -107,6 +108,9 @@ export async function getAudioDuration(
   return estimateAudioDuration(audioBuffer);
 }
 
-export function estimateAudioDuration(audioBuffer: Buffer, bitrate = 128): number {
+export function estimateAudioDuration(
+  audioBuffer: Buffer,
+  bitrate: number = DEFAULT_ESTIMATED_BITRATE_KBPS,
+): number {
   return Math.round(((audioBuffer.length * 8) / (bitrate * 1000)) * 100) / 100;
 }
