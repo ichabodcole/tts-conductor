@@ -24,7 +24,6 @@
     "build": "tsdown",
     "clean": "tsdown --clean",
     "dev": "tsdown --watch",
-    "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest --run --config ../../vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },

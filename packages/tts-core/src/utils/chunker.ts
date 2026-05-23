@@ -1,5 +1,5 @@
-import type { ProviderCapabilities } from '../provider';
 import type { TtsLogger } from '../config';
+import type { ProviderCapabilities } from '../provider';
 import type { Segment } from './segmenter';
 
 export interface Chunk {
@@ -34,9 +34,8 @@ function splitByBoundaries(input: string, maxLen: number): string[] {
     if (splitPos < 0) {
       const sentenceRe = /[.!?](?=\s|$)/g;
       let lastEnd = -1;
-      let m: RegExpExecArray | null;
-      while ((m = sentenceRe.exec(window))) {
-        lastEnd = m.index + 1;
+      for (const m of window.matchAll(sentenceRe)) {
+        lastEnd = (m.index ?? 0) + 1;
       }
       if (lastEnd >= 0) splitPos = lastEnd;
     }
@@ -63,7 +62,7 @@ export function toChunks(
   const renderInlineBreak =
     caps.renderInlineBreak ?? ((seconds: number) => `<break time="${seconds}s" />`);
   const MAX_CHARS =
-    typeof caps.maxCharsPerRequest === 'number' && isFinite(caps.maxCharsPerRequest)
+    typeof caps.maxCharsPerRequest === 'number' && Number.isFinite(caps.maxCharsPerRequest)
       ? Math.max(1, caps.maxCharsPerRequest - 16)
       : undefined;
 
@@ -81,7 +80,7 @@ export function toChunks(
 
   for (const seg of segments) {
     if (seg.kind === 'text') {
-      const next = (buffer ? buffer + ' ' : '') + seg.value;
+      const next = (buffer ? `${buffer} ` : '') + seg.value;
       if (MAX_CHARS && next.length > MAX_CHARS) {
         const parts = splitByBoundaries(next, MAX_CHARS);
         for (let i = 0; i < parts.length - 1; i++) {

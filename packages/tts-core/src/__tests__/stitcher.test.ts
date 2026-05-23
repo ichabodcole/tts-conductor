@@ -1,6 +1,6 @@
+import { execa } from 'execa';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Chunk } from '../utils/chunker';
-import { execa } from 'execa';
 
 const defaultExecaImpl = vi.hoisted(() => async (_cmd: string | URL, args?: readonly string[]) => {
   const list = Array.isArray(args) ? [...args] : [];
@@ -39,7 +39,7 @@ const config = {
   },
 };
 
-let buildFinalAudio: (typeof import('../utils/stitcher'))['buildFinalAudio'];
+let buildFinalAudio: typeof import('../utils/stitcher')['buildFinalAudio'];
 
 beforeEach(async () => {
   vi.clearAllMocks();
@@ -88,7 +88,7 @@ describe('buildFinalAudio', () => {
 
   it('falls back to filter concat when concat demuxer fails', async () => {
     const execaMock = getExecaMock();
-    execaMock.mockImplementation(async (cmd: string | URL, args?: readonly string[]) => {
+    execaMock.mockImplementation(async (_cmd: string | URL, args?: readonly string[]) => {
       const list = Array.isArray(args) ? [...args] : [];
       const isConcatDemux =
         list.includes('-f') && list.includes('concat') && !list.includes('-filter_complex');

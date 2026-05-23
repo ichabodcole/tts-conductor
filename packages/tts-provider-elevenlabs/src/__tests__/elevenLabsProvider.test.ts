@@ -1,5 +1,5 @@
-import type { TtsProviderContext, TtsRuntimeConfig } from '@tts-conductor/core';
 import { Readable } from 'node:stream';
+import type { TtsProviderContext, TtsRuntimeConfig } from '@tts-conductor/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const convertHandler = vi.hoisted(() => vi.fn());
@@ -25,7 +25,7 @@ vi.mock('@tts-conductor/core', async () => {
   };
 });
 
-let elevenLabsProviderFactory: (typeof import('../elevenLabsProvider'))['elevenLabsProviderFactory'];
+let elevenLabsProviderFactory: typeof import('../elevenLabsProvider')['elevenLabsProviderFactory'];
 
 function createContext(overrides: Partial<TtsRuntimeConfig> = {}): {
   context: TtsProviderContext;

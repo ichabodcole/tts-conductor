@@ -20,7 +20,7 @@ vi.mock('ffmpeg-static', () => ({
   default: '/mock/ffmpeg',
 }));
 
-let getAudioDuration: (typeof import('../utils/duration'))['getAudioDuration'];
+let getAudioDuration: typeof import('../utils/duration')['getAudioDuration'];
 
 beforeEach(async () => {
   vi.clearAllMocks();

@@ -1,6 +1,6 @@
 import type { TtsLogger } from '../config';
-import { parsePauseDuration } from './pause';
 import type { PauseTable } from './pause';
+import { parsePauseDuration } from './pause';
 
 export type Segment =
   | { kind: 'text'; value: string }
@@ -9,14 +9,15 @@ export type Segment =
 const PAUSE_RE = /\[PAUSE:([A-Z_]+(?::\d+(?:\.\d+)?[xs]?)?|\d+(?:\.\d+)?s?)\]/gi;
 
 export function parseScript(input: string, table: PauseTable, logger?: TtsLogger): Segment[] {
-  PAUSE_RE.lastIndex = 0;
+  // matchAll clones the source regex internally, so the module-level PAUSE_RE
+  // is safe to use across concurrent calls (no shared lastIndex state).
   const segments: Segment[] = [];
   let lastIndex = 0;
-  let match: RegExpExecArray | null;
 
-  while ((match = PAUSE_RE.exec(input))) {
-    if (match.index > lastIndex) {
-      const textContent = input.slice(lastIndex, match.index).trim();
+  for (const match of input.matchAll(PAUSE_RE)) {
+    const matchIndex = match.index ?? 0;
+    if (matchIndex > lastIndex) {
+      const textContent = input.slice(lastIndex, matchIndex).trim();
       if (textContent) {
         segments.push({ kind: 'text', value: textContent });
       }
@@ -32,7 +33,7 @@ export function parseScript(input: string, table: PauseTable, logger?: TtsLogger
       segments.push({ kind: 'pause', label, seconds });
     }
 
-    lastIndex = PAUSE_RE.lastIndex;
+    lastIndex = matchIndex + fullMatch.length;
   }
 
   if (lastIndex < input.length) {

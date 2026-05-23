@@ -1,7 +1,7 @@
+import fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { execa } from 'execa';
-import fs from 'fs/promises';
-import { tmpdir } from 'os';
-import path from 'path';
 import type { BuildAudioOptions, FfmpegConfig, TtsLogger, TtsRuntimeConfig } from '../config';
 import { ProcessStage } from '../config';
 import type { Chunk } from './chunker';

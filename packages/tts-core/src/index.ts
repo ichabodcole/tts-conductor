@@ -1,5 +1,4 @@
-export { TtsConductor, createTtsConductor } from './conductor';
-export { ProcessStage } from './config';
+export { createTtsConductor, TtsConductor } from './conductor';
 export type {
   BuildAudioOptions,
   DebugMeta,
@@ -8,6 +7,7 @@ export type {
   TtsLogger,
   TtsRuntimeConfig,
 } from './config';
+export { ProcessStage } from './config';
 export { DEFAULT_PAUSE_TABLE } from './defaults';
 export type {
   ProviderOptionsFor,
@@ -20,9 +20,9 @@ export { ttsGenerateFull, withTimeout } from './operations';
 export type { GenerationResult, ProviderCapabilities, TtsProvider } from './provider';
 export { toChunks } from './utils/chunker';
 export { estimateAudioDuration, getAudioDuration } from './utils/duration';
-export { extractPauseMarkers, isValidPauseFormat, parsePauseDuration } from './utils/pause';
 export type { PauseTable } from './utils/pause';
-export { parseScript } from './utils/segmenter';
+export { extractPauseMarkers, isValidPauseFormat, parsePauseDuration } from './utils/pause';
 export type { Segment } from './utils/segmenter';
-export { buildFinalAudio } from './utils/stitcher';
+export { parseScript } from './utils/segmenter';
 export type { BuildFinalAudioResult } from './utils/stitcher';
+export { buildFinalAudio } from './utils/stitcher';

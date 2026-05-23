@@ -19,10 +19,8 @@ export interface TtsProviderContext {
  *   }
  * }
  */
-// eslint-disable-next-line @typescript-eslint/no-empty-object-type
-export interface TtsProviderRegistry {
-  // Base registry - provider packages extend this via module augmentation
-}
+// biome-ignore lint/suspicious/noEmptyInterface: declaration-merging target — must stay an empty interface so provider packages can augment it via `interface TtsProviderRegistry { ... }`.
+export interface TtsProviderRegistry {}
 
 /**
  * Type helper to get the options type for a specific provider ID

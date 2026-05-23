@@ -1,10 +1,9 @@
+import fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { execa } from 'execa';
 import ffmpegPath from 'ffmpeg-static';
-import fs from 'fs/promises';
-import path from 'path';
-import { tmpdir } from 'os';
-import type { FfmpegConfig } from '../config';
-import type { TtsLogger } from '../config';
+import type { FfmpegConfig, TtsLogger } from '../config';
 
 async function resolveFfprobeBin(ffmpegConfig?: FfmpegConfig): Promise<string> {
   const candidates = [ffmpegConfig?.ffprobePath, process.env.FFPROBE_PATH, 'ffprobe'].filter(
