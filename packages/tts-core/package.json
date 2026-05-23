@@ -1,6 +1,6 @@
 {
-  "name": "@tts-conductor/core",
-  "version": "1.1.0",
+  "name": "@alien-lobster-buffet/tts-conductor-core",
+  "version": "0.1.0-alpha.0",
   "description": "Core utilities for parsing, chunking, and assembling TTS audio",
   "keywords": [
     "tts",
@@ -9,6 +9,16 @@
     "orchestration"
   ],
   "license": "MIT",
+  "author": "Cole Reed <alienlobsterbuffet.dev@gmail.com>",
+  "homepage": "https://github.com/ichabodcole/tts-conductor#readme",
+  "bugs": {
+    "url": "https://github.com/ichabodcole/tts-conductor/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ichabodcole/tts-conductor.git",
+    "directory": "packages/tts-core"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -23,6 +33,12 @@
     "LICENSE",
     "README.md"
   ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
     "clean": "tsdown --clean",

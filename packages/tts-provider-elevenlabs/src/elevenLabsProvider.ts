@@ -1,9 +1,3 @@
-import type { ElevenLabs as ElevenLabsTypes } from '@elevenlabs/elevenlabs-js';
-import {
-  ElevenLabsClient,
-  ElevenLabsError,
-  ElevenLabsTimeoutError,
-} from '@elevenlabs/elevenlabs-js';
 import type {
   GenerateCallOptions,
   GenerationResult,
@@ -12,7 +6,7 @@ import type {
   TtsProviderContext,
   TtsProviderFactory,
   VoiceCatalog,
-} from '@tts-conductor/core';
+} from '@alien-lobster-buffet/tts-conductor-core';
 import {
   getAudioDuration,
   TtsAuthenticationError,
@@ -21,7 +15,13 @@ import {
   TtsQuotaExceededError,
   TtsRateLimitError,
   TtsTransientError,
-} from '@tts-conductor/core';
+} from '@alien-lobster-buffet/tts-conductor-core';
+import type { ElevenLabs as ElevenLabsTypes } from '@elevenlabs/elevenlabs-js';
+import {
+  ElevenLabsClient,
+  ElevenLabsError,
+  ElevenLabsTimeoutError,
+} from '@elevenlabs/elevenlabs-js';
 import { type ElevenLabsRawVoice, ElevenLabsVoiceCatalog } from './voiceCatalog';
 
 /**
@@ -78,7 +78,7 @@ export interface ElevenLabsCallOverrides {
 }
 
 // Register the ElevenLabs provider in the type registries
-declare module '@tts-conductor/core' {
+declare module '@alien-lobster-buffet/tts-conductor-core' {
   interface TtsProviderRegistry {
     '11labs': ElevenLabsProviderOptions;
   }
@@ -234,7 +234,7 @@ function isAbortError(error: unknown): boolean {
 }
 
 /**
- * Convert an error thrown by the ElevenLabs SDK into one of the `@tts-conductor/core`
+ * Convert an error thrown by the ElevenLabs SDK into one of the `@alien-lobster-buffet/tts-conductor-core`
  * error classes, so consumers can apply uniform retry / classification logic without
  * parsing message strings.
  *

@@ -19,24 +19,24 @@
       },
     },
     "packages/tts-core": {
-      "name": "@tts-conductor/core",
-      "version": "1.1.0",
+      "name": "@alien-lobster-buffet/tts-conductor-core",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "execa": "^9.6.0",
         "ffmpeg-static": "^5.2.0",
       },
     },
     "packages/tts-provider-elevenlabs": {
-      "name": "@tts-conductor/provider-elevenlabs",
-      "version": "1.1.0",
+      "name": "@alien-lobster-buffet/tts-conductor-elevenlabs",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "@elevenlabs/elevenlabs-js": "^2.49.0",
       },
       "devDependencies": {
-        "@tts-conductor/core": "workspace:^",
+        "@alien-lobster-buffet/tts-conductor-core": "workspace:^",
       },
       "peerDependencies": {
-        "@tts-conductor/core": "workspace:*",
+        "@alien-lobster-buffet/tts-conductor-core": "^0.1.0-alpha.0",
       },
     },
   },
@@ -46,6 +46,10 @@
     "@biomejs/biome",
   ],
   "packages": {
+    "@alien-lobster-buffet/tts-conductor-core": ["@alien-lobster-buffet/tts-conductor-core@workspace:packages/tts-core"],
+
+    "@alien-lobster-buffet/tts-conductor-elevenlabs": ["@alien-lobster-buffet/tts-conductor-elevenlabs@workspace:packages/tts-provider-elevenlabs"],
+
     "@babel/generator": ["@babel/generator@8.0.0-rc.5", "", { "dependencies": { "@babel/parser": "^8.0.0-rc.5", "@babel/types": "^8.0.0-rc.5", "@jridgewell/gen-mapping": "^0.3.12", "@jridgewell/trace-mapping": "^0.3.28", "@types/jsesc": "^2.5.0", "jsesc": "^3.0.2" } }, "sha512-nFZPWz3FHIS7y6rMIVoa/WBwjdutfIaRJIBQjzn+t3RnecZoRNlGmGcyR2wb0T/IgSd50Kz/6dG8/LvMCRunjg=="],
 
     "@babel/helper-string-parser": ["@babel/helper-string-parser@7.27.1", "", {}, "sha512-qMlSxKbpRlAridDExk92nSobyDdpPijUq2DW6oDnUqd0iOGxmQjyqhMIihI9+zv4LPyZdRje2cavWPbCbWm3eA=="],
@@ -239,10 +243,6 @@
     "@sindresorhus/merge-streams": ["@sindresorhus/merge-streams@4.0.0", "", {}, "sha512-tlqY9xq5ukxTUZBmoOp+m61cqwQD5pHJtFY3Mn8CA8ps6yghLH/Hw8UPdqg4OLmFW3IFlcXnQNmo/dh8HzXYIQ=="],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
-
-    "@tts-conductor/core": ["@tts-conductor/core@workspace:packages/tts-core"],
-
-    "@tts-conductor/provider-elevenlabs": ["@tts-conductor/provider-elevenlabs@workspace:packages/tts-provider-elevenlabs"],
 
     "@turbo/darwin-64": ["@turbo/darwin-64@2.9.14", "", { "os": "darwin", "cpu": "x64" }, "sha512-t7QiPflaEyBE4oayeZtSmu4mEfjgIrcNlNNl1z1dmIVPqEdtA7+CfTf8d7KXsOGPh6aNgWjKxyvQg9uGfDQF+A=="],
 

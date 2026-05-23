@@ -1,6 +1,6 @@
 {
-  "name": "@tts-conductor/provider-elevenlabs",
-  "version": "1.1.0",
+  "name": "@alien-lobster-buffet/tts-conductor-elevenlabs",
+  "version": "0.1.0-alpha.0",
   "description": "ElevenLabs provider bindings for the TTS Conductor ecosystem",
   "keywords": [
     "tts",
@@ -8,6 +8,16 @@
     "provider"
   ],
   "license": "MIT",
+  "author": "Cole Reed <alienlobsterbuffet.dev@gmail.com>",
+  "homepage": "https://github.com/ichabodcole/tts-conductor#readme",
+  "bugs": {
+    "url": "https://github.com/ichabodcole/tts-conductor/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ichabodcole/tts-conductor.git",
+    "directory": "packages/tts-provider-elevenlabs"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -22,6 +32,12 @@
     "LICENSE",
     "README.md"
   ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsdown",
     "clean": "tsdown --clean",
@@ -30,12 +46,12 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@tts-conductor/core": "workspace:*"
+    "@alien-lobster-buffet/tts-conductor-core": "^0.1.0-alpha.0"
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.49.0"
   },
   "devDependencies": {
-    "@tts-conductor/core": "workspace:^"
+    "@alien-lobster-buffet/tts-conductor-core": "workspace:^"
   }
 }

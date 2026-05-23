@@ -21,13 +21,13 @@ packages/
 
 ## Packages
 
-- **@tts-conductor/core** (`packages/tts-core`)
+- **@alien-lobster-buffet/tts-conductor-core** (`packages/tts-core`)
   - Exposes the orchestration runtime, pause parsing utilities, chunker, and FFmpeg-based stitcher.
-  - Tests live in `packages/tts-core/src/__tests__`; run with `bun --filter @tts-conductor/core run test`.
-  - Build artifacts emit to `packages/tts-core/dist` via `bun --filter @tts-conductor/core run build`.
-- **@tts-conductor/provider-elevenlabs** (`packages/tts-provider-elevenlabs`)
+  - Tests live in `packages/tts-core/src/__tests__`; run with `bun --filter @alien-lobster-buffet/tts-conductor-core run test`.
+  - Build artifacts emit to `packages/tts-core/dist` via `bun --filter @alien-lobster-buffet/tts-conductor-core run build`.
+- **@alien-lobster-buffet/tts-conductor-elevenlabs** (`packages/tts-provider-elevenlabs`)
   - Wraps the ElevenLabs JS SDK to satisfy the core `TtsProvider` contract, including duration probing.
-  - Tests reside in `packages/tts-provider-elevenlabs/src/__tests__`; execute with `bun --filter @tts-conductor/provider-elevenlabs run test`.
+  - Tests reside in `packages/tts-provider-elevenlabs/src/__tests__`; execute with `bun --filter @alien-lobster-buffet/tts-conductor-elevenlabs run test`.
   - Depends on the core package via workspace protocol and outputs bundles to `packages/tts-provider-elevenlabs/dist`.
 
 ## Getting Started

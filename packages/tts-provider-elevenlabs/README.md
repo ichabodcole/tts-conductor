@@ -1,12 +1,15 @@
-# @tts-conductor/provider-elevenlabs
+# @alien-lobster-buffet/tts-conductor-elevenlabs
 
 ElevenLabs provider factory for the TTS Conductor ecosystem. Creates `TtsProvider` instances backed by the official `@elevenlabs/elevenlabs-js` SDK and reuses the shared FFmpeg helpers for duration metadata.
 
 ## Usage
 
 ```ts
-import { createTtsConductor, DEFAULT_PAUSE_TABLE } from "@tts-conductor/core";
-import { elevenLabsProviderFactory } from "@tts-conductor/provider-elevenlabs";
+import {
+  createTtsConductor,
+  DEFAULT_PAUSE_TABLE,
+} from "@alien-lobster-buffet/tts-conductor-core";
+import { elevenLabsProviderFactory } from "@alien-lobster-buffet/tts-conductor-elevenlabs";
 
 // Instantiate the conductor once at application startup.
 const conductor = createTtsConductor({
@@ -84,5 +87,5 @@ Going above `~5000` will start hitting the server-side limit and surface as
 ## Requirements
 
 - Node 18+
-- `@tts-conductor/core` installed in the host workspace
+- `@alien-lobster-buffet/tts-conductor-core` installed in the host workspace
 - Valid ElevenLabs API key & voice ID

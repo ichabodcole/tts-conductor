@@ -1,5 +1,5 @@
-import type { TtsRuntimeConfig } from '@tts-conductor/core';
-import { createTtsConductor } from '@tts-conductor/core';
+import type { TtsRuntimeConfig } from '@alien-lobster-buffet/tts-conductor-core';
+import { createTtsConductor } from '@alien-lobster-buffet/tts-conductor-core';
 import { describe, expect, it, vi } from 'vitest';
 import { elevenLabsProviderFactory } from '../elevenLabsProvider';
 

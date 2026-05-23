@@ -12,8 +12,8 @@ If you've ever tried to render a 20-minute narration through a TTS API that caps
 
 A two-package TypeScript monorepo:
 
-- **`@tts-conductor/core`** — vendor-agnostic orchestration: script parsing, chunking, provider registry, audio stitching. Knows nothing about specific TTS vendors.
-- **`@tts-conductor/provider-elevenlabs`** — a concrete adapter implementing the core's `TtsProvider` contract against the ElevenLabs JS SDK.
+- **`@alien-lobster-buffet/tts-conductor-core`** — vendor-agnostic orchestration: script parsing, chunking, provider registry, audio stitching. Knows nothing about specific TTS vendors.
+- **`@alien-lobster-buffet/tts-conductor-elevenlabs`** — a concrete adapter implementing the core's `TtsProvider` contract against the ElevenLabs JS SDK.
 
 Adapters are added via a factory + module-augmentation pattern, so new providers slot in with full type safety for their option shapes.
 
@@ -50,7 +50,7 @@ The conductor's bet is that these four things are stable enough to live in share
 
 These are discovered from the code, not declared in advance:
 
-- **The core knows nothing about vendors.** `@tts-conductor/core` has zero TTS-vendor imports. Every vendor-specific concern lives in an adapter package.
+- **The core knows nothing about vendors.** `@alien-lobster-buffet/tts-conductor-core` has zero TTS-vendor imports. Every vendor-specific concern lives in an adapter package.
 - **Trust the provider when it knows more.** `GenerationResult.duration`, `mimeType`, and `size` are optional. If a provider supplies duration, the core skips an expensive ffprobe call. The contract rewards adapters that do their own work.
 - **Provider identity flows through context, not constructors.** Factories declare a typed `id`; the conductor stamps that ID onto `TtsProviderContext` at creation; providers assign `this.id = ctx.id`. No unsafe casts, no duplicated bookkeeping.
 - **Small contracts over big surfaces.** `TtsProvider` is three fields: `id`, `caps`, `generate()`. The whole orchestration runtime is ~450 lines of source. New adapters cost very little to write.
@@ -83,7 +83,7 @@ The repo behaves like extracted infrastructure, not speculative architecture. Sp
 
 ## Status
 
-**Active: preparing for public npm release.** The repo is already public on GitHub; the current focus is the prep work to publish `@tts-conductor/core` and `@tts-conductor/provider-elevenlabs` to npm. Both packages are at v1.1.0 with release-please wired up, the license is MIT, and one adapter exists and works. Last code commit was 2025-11-20, but the release-prep work is in flight as of 2026-05-22.
+**Active: preparing for public npm release.** The repo is already public on GitHub; the current focus is the prep work to publish `@alien-lobster-buffet/tts-conductor-core` and `@alien-lobster-buffet/tts-conductor-elevenlabs` to npm. Both packages are at v1.1.0 with release-please wired up, the license is MIT, and one adapter exists and works. Last code commit was 2025-11-20, but the release-prep work is in flight as of 2026-05-22.
 
 ---
 

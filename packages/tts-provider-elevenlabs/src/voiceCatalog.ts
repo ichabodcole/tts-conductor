@@ -1,10 +1,10 @@
-import type { ElevenLabs, ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import {
   TtsError,
   type VoiceCatalog,
   type VoiceCatalogEntry,
   type VoiceCatalogQuery,
-} from '@tts-conductor/core';
+} from '@alien-lobster-buffet/tts-conductor-core';
+import type { ElevenLabs, ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 
 /**
  * The raw ElevenLabs voice record exposed via `VoiceCatalogEntry.raw`. Re-exported

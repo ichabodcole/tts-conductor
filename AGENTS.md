@@ -10,7 +10,7 @@ This Bun workspace hosts core orchestration and provider packages under `package
 
 ## Build, Test, and Development Commands
 
-Run `bun install` once to hydrate the workspace. Use `bun run build` to invoke Turbo’s build pipeline across packages, `bun run test` for the aggregated Vitest runs, and `bun --filter @tts-conductor/core run test` (or another filter) to target a single package. Formatting is applied with `bun run format` (write). `bun run lint` runs Biome’s combined lint + format check (`biome check --error-on-warnings .`); `bun run lint:fix` applies safe auto-fixes. `bun run check` (alias: `bun run verify`) runs typecheck + lint + tests as the pre-merge gate. Markdown is formatted separately with `bun run format:md` (Prettier).
+Run `bun install` once to hydrate the workspace. Use `bun run build` to invoke Turbo’s build pipeline across packages, `bun run test` for the aggregated Vitest runs, and `bun --filter @alien-lobster-buffet/tts-conductor-core run test` (or another filter) to target a single package. Formatting is applied with `bun run format` (write). `bun run lint` runs Biome’s combined lint + format check (`biome check --error-on-warnings .`); `bun run lint:fix` applies safe auto-fixes. `bun run check` (alias: `bun run verify`) runs typecheck + lint + tests as the pre-merge gate. Markdown is formatted separately with `bun run format:md` (Prettier).
 
 ## Coding Style & Naming Conventions
 

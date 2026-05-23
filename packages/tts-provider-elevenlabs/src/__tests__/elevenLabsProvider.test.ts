@@ -1,5 +1,8 @@
 import { Readable } from 'node:stream';
-import type { TtsProviderContext, TtsRuntimeConfig } from '@tts-conductor/core';
+import type {
+  TtsProviderContext,
+  TtsRuntimeConfig,
+} from '@alien-lobster-buffet/tts-conductor-core';
 import {
   TtsAuthenticationError,
   TtsError,
@@ -7,7 +10,7 @@ import {
   TtsQuotaExceededError,
   TtsRateLimitError,
   TtsTransientError,
-} from '@tts-conductor/core';
+} from '@alien-lobster-buffet/tts-conductor-core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Minimal stand-ins for the ElevenLabs SDK error classes, so the adapter's
@@ -65,8 +68,10 @@ vi.mock('@elevenlabs/elevenlabs-js', () => ({
 
 const getAudioDurationMock = vi.hoisted(() => vi.fn().mockResolvedValue(1.5));
 
-vi.mock('@tts-conductor/core', async () => {
-  const actual = await vi.importActual<Record<string, unknown>>('@tts-conductor/core');
+vi.mock('@alien-lobster-buffet/tts-conductor-core', async () => {
+  const actual = await vi.importActual<Record<string, unknown>>(
+    '@alien-lobster-buffet/tts-conductor-core',
+  );
   return {
     ...actual,
     getAudioDuration: getAudioDurationMock,

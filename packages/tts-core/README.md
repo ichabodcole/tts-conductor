@@ -1,4 +1,4 @@
-# @tts-conductor/core
+# @alien-lobster-buffet/tts-conductor-core
 
 Core building blocks for text-to-speech orchestration: parsing scripts with custom pause tables, chunking to provider limits, running provider jobs with progress feedback, and assembling MP3 output via FFmpeg.
 
@@ -9,7 +9,7 @@ import {
   createTtsConductor,
   DEFAULT_PAUSE_TABLE,
   ttsGenerateFull,
-} from "@tts-conductor/core";
+} from "@alien-lobster-buffet/tts-conductor-core";
 
 const conductor = createTtsConductor({
   pauses: DEFAULT_PAUSE_TABLE,
@@ -38,8 +38,14 @@ The core package includes a flexible debugging system for inspecting audio proce
 ### Basic Setup
 
 ```ts
-import { createTtsConductor, ProcessStage } from "@tts-conductor/core";
-import type { DebugSink, DebugMeta } from "@tts-conductor/core";
+import {
+  createTtsConductor,
+  ProcessStage,
+} from "@alien-lobster-buffet/tts-conductor-core";
+import type {
+  DebugSink,
+  DebugMeta,
+} from "@alien-lobster-buffet/tts-conductor-core";
 
 class FileSystemDebugSink implements DebugSink {
   async saveBuffer(buffer: Buffer, meta: DebugMeta): Promise<void> {
@@ -213,7 +219,7 @@ The conductor provides type-safe provider registration via module augmentation. 
 #### Minimal custom factory
 
 ```ts
-import type { TtsProviderFactory } from "@tts-conductor/core";
+import type { TtsProviderFactory } from "@alien-lobster-buffet/tts-conductor-core";
 
 // Define your provider options interface
 interface DemoProviderOptions {
@@ -221,7 +227,7 @@ interface DemoProviderOptions {
 }
 
 // Register your provider type (enables type-safe usage)
-declare module "@tts-conductor/core" {
+declare module "@alien-lobster-buffet/tts-conductor-core" {
   interface TtsProviderRegistry {
     demo: DemoProviderOptions;
   }

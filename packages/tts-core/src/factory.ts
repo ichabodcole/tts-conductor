@@ -12,7 +12,7 @@ export interface TtsProviderContext {
  *
  * Example usage in a provider package:
  *
- * declare module '@tts-conductor/core' {
+ * declare module '@alien-lobster-buffet/tts-conductor-core' {
  *   interface TtsProviderRegistry {
  *     '11labs': ElevenLabsProviderOptions;
  *     'my-provider': MyProviderOptions;
@@ -41,7 +41,7 @@ export type RegisteredProviderIds = keyof TtsProviderRegistry;
  *
  * Example usage in a provider package:
  *
- * declare module '@tts-conductor/core' {
+ * declare module '@alien-lobster-buffet/tts-conductor-core' {
  *   interface TtsProviderRegistry {
  *     'my-provider': MyProviderOptions;
  *   }
