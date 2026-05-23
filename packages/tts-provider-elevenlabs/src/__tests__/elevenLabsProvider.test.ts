@@ -134,6 +134,112 @@ describe('ElevenLabsProvider', () => {
     expect(result.size).toBeGreaterThan(0);
   });
 
+  describe('per-call overrides (A2)', () => {
+    it('overrides voiceId at call time without rebuilding the provider', async () => {
+      const { context } = createContext();
+      convertHandler.mockResolvedValue(Readable.from([Buffer.from('x')])).mockName('convert');
+
+      const provider = elevenLabsProviderFactory.create(context, {
+        apiKey: 'key',
+        voiceId: 'default-voice',
+      });
+
+      await provider.generate('<speak>x</speak>', { voiceId: 'override-voice' });
+
+      // convertHandler is called with (voiceId, request). The first arg should be the override.
+      expect(convertHandler.mock.calls[0]?.[0]).toBe('override-voice');
+    });
+
+    it('overrides voiceSettings at call time (full replacement, not shallow merge)', async () => {
+      const { context } = createContext();
+      convertHandler.mockResolvedValue(Readable.from([Buffer.from('x')])).mockName('convert');
+      const overrideSettings = { stability: 0.9, similarity_boost: 0.4 } as const;
+
+      const provider = elevenLabsProviderFactory.create(context, {
+        apiKey: 'key',
+        voiceId: 'voice',
+        // Construction-time has stability AND speed.
+        voiceSettings: { stability: 0.1, speed: 0.7 },
+      });
+
+      // Override supplies only stability + similarity_boost. The full-replacement
+      // semantic means `speed: 0.7` from construction time should be dropped —
+      // it's not shallow-merged.
+      await provider.generate('<speak>x</speak>', { voiceSettings: overrideSettings });
+
+      const callArgs = convertHandler.mock.calls[0]?.[1] as { voiceSettings: object };
+      expect(callArgs.voiceSettings).toEqual(overrideSettings);
+      // Explicitly verify the construction-time `speed` did NOT leak through —
+      // this would silently flip to true under a shallow-merge implementation.
+      expect(callArgs.voiceSettings).not.toHaveProperty('speed');
+    });
+
+    it('falls back to construction-time voiceId when only voiceSettings is overridden', async () => {
+      const { context } = createContext();
+      convertHandler.mockResolvedValue(Readable.from([Buffer.from('x')])).mockName('convert');
+
+      const provider = elevenLabsProviderFactory.create(context, {
+        apiKey: 'key',
+        voiceId: 'base-voice',
+        quality: 'standard',
+      });
+
+      // Override only voiceSettings — voiceId and quality should fall back.
+      await provider.generate('<speak>x</speak>', { voiceSettings: { stability: 0.5 } });
+
+      // Symmetry check: confirms the three ?? fallback chains aren't
+      // interdependent — fallback works in any direction.
+      expect(convertHandler.mock.calls[0]?.[0]).toBe('base-voice');
+      expect(convertHandler).toHaveBeenCalledWith(
+        'base-voice',
+        expect.objectContaining({ modelId: 'eleven_multilingual_v2' }),
+      );
+    });
+
+    it('overrides quality (model mapping) at call time', async () => {
+      const { context } = createContext();
+      convertHandler.mockResolvedValue(Readable.from([Buffer.from('x')])).mockName('convert');
+
+      const provider = elevenLabsProviderFactory.create(context, {
+        apiKey: 'key',
+        voiceId: 'voice',
+        quality: 'standard',
+      });
+
+      await provider.generate('<speak>x</speak>', { quality: 'draft' });
+
+      expect(convertHandler).toHaveBeenCalledWith(
+        'voice',
+        expect.objectContaining({ modelId: 'eleven_turbo_v2_5' }),
+      );
+    });
+
+    it('falls back to construction-time options for fields not overridden', async () => {
+      const { context } = createContext();
+      convertHandler.mockResolvedValue(Readable.from([Buffer.from('x')])).mockName('convert');
+      const baseSettings = { stability: 0.5, speed: 0.9 } as const;
+
+      const provider = elevenLabsProviderFactory.create(context, {
+        apiKey: 'key',
+        voiceId: 'base-voice',
+        voiceSettings: baseSettings,
+        quality: 'high',
+      });
+
+      // Override only voiceId; voiceSettings and quality should fall back to construction-time.
+      await provider.generate('<speak>x</speak>', { voiceId: 'just-voice-changed' });
+
+      expect(convertHandler.mock.calls[0]?.[0]).toBe('just-voice-changed');
+      expect(convertHandler).toHaveBeenCalledWith(
+        'just-voice-changed',
+        expect.objectContaining({
+          voiceSettings: baseSettings,
+          modelId: 'eleven_multilingual_v2', // 'high' quality
+        }),
+      );
+    });
+  });
+
   it('passes voice settings and quality mapping to ElevenLabs', async () => {
     const { context } = createContext();
     convertHandler.mockResolvedValue(Readable.from([Buffer.from('data')])).mockName('convert');

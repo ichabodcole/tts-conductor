@@ -171,6 +171,57 @@ describe('ttsGenerateFull', () => {
       runtimeConfig.logger,
     );
   });
+
+  it('uses per-call pause table override when supplied (A1)', async () => {
+    const callPauses = { CUSTOM_PAUSE: 7.5 };
+
+    await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+      pauses: callPauses,
+    });
+
+    // parseScript should receive the per-call pauses, NOT the runtime-config pauses
+    expect(parseScriptMock).toHaveBeenCalledWith('Hello world', callPauses, runtimeConfig.logger);
+    expect(parseScriptMock).not.toHaveBeenCalledWith(
+      'Hello world',
+      runtimeConfig.pauses,
+      runtimeConfig.logger,
+    );
+  });
+
+  it('falls back to runtime-config pauses when no per-call override (A1)', async () => {
+    await ttsGenerateFull('Hello world', provider, runtimeConfig);
+
+    expect(parseScriptMock).toHaveBeenCalledWith(
+      'Hello world',
+      runtimeConfig.pauses,
+      runtimeConfig.logger,
+    );
+  });
+
+  it('uses per-call maxCharsPerRequest override when supplied (A5)', async () => {
+    await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+      maxCharsPerRequest: 50,
+    });
+
+    // toChunks should receive caps with the overridden maxCharsPerRequest
+    expect(toChunksMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ maxCharsPerRequest: 50 }),
+      runtimeConfig.logger,
+    );
+    // Sanity: the provider's own caps had a different value
+    expect(provider.caps.maxCharsPerRequest).not.toBe(50);
+  });
+
+  it('falls back to provider caps when no per-call maxCharsPerRequest (A5)', async () => {
+    await ttsGenerateFull('Hello world', provider, runtimeConfig);
+
+    expect(toChunksMock).toHaveBeenCalledWith(
+      expect.anything(),
+      provider.caps,
+      runtimeConfig.logger,
+    );
+  });
 });
 
 describe('withTimeout', () => {

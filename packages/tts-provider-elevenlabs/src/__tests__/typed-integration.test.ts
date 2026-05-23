@@ -66,4 +66,26 @@ describe('ElevenLabs Typed Integration', () => {
 
     expect(provider.caps.maxInlineBreakSeconds).toBe(3);
   });
+
+  it('threads ElevenLabsCallOverrides through createProvider so per-call overrides typecheck', () => {
+    // This test exists as a typecheck guard: if the conductor's createProvider
+    // path ever loses the CallOverridesFor<T> wiring, the lines marked below
+    // will fail to compile. Without this guard the failure mode is silent —
+    // overrides still work at runtime but consumers see a `never`-typed second
+    // parameter and have to cast.
+    const conductor = createTtsConductor(runtimeConfig);
+    conductor.registerProvider(elevenLabsProviderFactory);
+
+    const provider = conductor.createProvider('11labs', {
+      apiKey: 'test-key',
+      voiceId: 'test-voice',
+    });
+
+    // If this line compiles, CallOverridesFor<'11labs'> is correctly resolving
+    // to ElevenLabsCallOverrides through the conductor's typed return value.
+    const overridesFn: (chunk: string) => ReturnType<typeof provider.generate> = (chunk) =>
+      provider.generate(chunk, { voiceId: 'override', quality: 'draft' });
+
+    expect(typeof overridesFn).toBe('function');
+  });
 });

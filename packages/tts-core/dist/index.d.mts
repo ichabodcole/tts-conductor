@@ -36,6 +36,27 @@ interface TtsRuntimeConfig {
 }
 interface BuildAudioOptions {
   debugJobId?: string;
+  /**
+   * Per-call pause table override. When provided, this replaces
+   * {@link TtsRuntimeConfig.pauses} for this call only — useful when one
+   * conductor instance serves multiple tenants or contexts that each need
+   * a distinct pause vocabulary without paying for a per-tenant conductor.
+   *
+   * If omitted, the conductor falls back to the pause table on its
+   * {@link TtsRuntimeConfig}.
+   */
+  pauses?: Record<string, number>;
+  /**
+   * Per-call override for {@link ProviderCapabilities.maxCharsPerRequest}.
+   * When provided as a positive integer, chunking uses this limit instead of
+   * the provider's own declared limit — useful for tuning latency / progress
+   * granularity per call without forking the provider.
+   *
+   * Non-positive values (`0` or negative) are silently treated as no override
+   * (every character becoming its own chunk would break the pipeline). If
+   * omitted or invalid, the provider's `caps.maxCharsPerRequest` is used.
+   */
+  maxCharsPerRequest?: number;
 }
 //#endregion
 //#region src/provider.d.ts
@@ -51,10 +72,23 @@ interface GenerationResult {
   duration?: number;
   size?: number;
 }
-interface TtsProvider {
+/**
+ * A TTS provider that turns one chunk of input into one audio buffer.
+ *
+ * The generic `TCallOverrides` lets a provider declare a shape for per-call
+ * option overrides (A/B'ing voices, regenerating with different settings,
+ * etc.) without consumers needing to construct a fresh provider instance
+ * per variation. The orchestration path (`ttsGenerateFull`) does not pass
+ * overrides — they're for consumers calling `provider.generate()` directly.
+ *
+ * Providers that don't support per-call overrides should leave `TCallOverrides`
+ * at its default of `never` and ignore the second parameter; the contract stays
+ * source-compatible with v1.1 consumers either way.
+ */
+interface TtsProvider<TCallOverrides = never> {
   readonly id: string;
   readonly caps: ProviderCapabilities;
-  generate(chunk: string): Promise<GenerationResult>;
+  generate(chunk: string, overrides?: TCallOverrides): Promise<GenerationResult>;
 }
 //#endregion
 //#region src/factory.d.ts
@@ -85,12 +119,46 @@ type ProviderOptionsFor<T extends keyof TtsProviderRegistry> = TtsProviderRegist
  */
 type RegisteredProviderIds = keyof TtsProviderRegistry;
 /**
- * Type-safe factory interface for registered providers.
- * All providers must be registered in TtsProviderRegistry via module augmentation.
+ * Parallel registry for per-call override types. Providers that accept per-call
+ * overrides on `generate()` register their override-shape here via module
+ * augmentation, alongside their construction-time options entry in
+ * `TtsProviderRegistry`. Providers that don't support per-call overrides leave
+ * this unregistered — `CallOverridesFor<T>` resolves to `never` for them.
+ *
+ * Example usage in a provider package:
+ *
+ * declare module '@tts-conductor/core' {
+ *   interface TtsProviderRegistry {
+ *     'my-provider': MyProviderOptions;
+ *   }
+ *   interface TtsProviderCallOverridesRegistry {
+ *     'my-provider': MyProviderCallOverrides;
+ *   }
+ * }
  */
-interface TtsProviderFactory<T extends RegisteredProviderIds> {
+interface TtsProviderCallOverridesRegistry {}
+/**
+ * Resolves to the per-call overrides type registered for provider ID `T`, or
+ * `never` if `T` does not have a `TtsProviderCallOverridesRegistry` entry. Used
+ * by `TtsConductor.createProvider` to return a properly-typed provider so
+ * `provider.generate(chunk, overrides)` typechecks against the registered
+ * override shape.
+ */
+type CallOverridesFor<T extends string> = T extends keyof TtsProviderCallOverridesRegistry ? TtsProviderCallOverridesRegistry[T] : never;
+/**
+ * Type-safe factory interface for registered providers.
+ *
+ * `TCallOverrides` declares the shape of per-call overrides that the produced
+ * provider accepts as the second argument to `generate()`. Defaults to `never`
+ * for providers that don't support per-call overrides — keeps the factory
+ * signature backward-compatible with v1.1 adapters.
+ *
+ * All providers must be registered in `TtsProviderRegistry` via module
+ * augmentation.
+ */
+interface TtsProviderFactory<T extends RegisteredProviderIds, TCallOverrides = never> {
   id: T;
-  create: (ctx: TtsProviderContext, options: ProviderOptionsFor<T>) => TtsProvider;
+  create: (ctx: TtsProviderContext, options: ProviderOptionsFor<T>) => TtsProvider<TCallOverrides>;
 }
 //#endregion
 //#region src/utils/pause.d.ts
@@ -157,14 +225,14 @@ declare class TtsConductor {
    * Register a provider factory with type-safe options.
    * Provider must be registered in the TtsProviderRegistry via module augmentation.
    */
-  registerProvider<T extends RegisteredProviderIds>(factory: TtsProviderFactory<T>): T;
+  registerProvider<T extends RegisteredProviderIds, TCallOverrides = CallOverridesFor<T>>(factory: TtsProviderFactory<T, TCallOverrides>): T;
   hasProvider(id: string): boolean;
   listProviders(): string[];
   /**
    * Create a provider instance with type-safe options.
    * Provider must be registered in the TtsProviderRegistry via module augmentation.
    */
-  createProvider<T extends RegisteredProviderIds>(id: T, options: ProviderOptionsFor<T>): TtsProvider;
+  createProvider<T extends RegisteredProviderIds>(id: T, options: ProviderOptionsFor<T>): TtsProvider<CallOverridesFor<T>>;
   generateFull(rawText: string, provider: TtsProvider, onProgress?: (percent: number) => void, options?: BuildAudioOptions): Promise<BuildFinalAudioResult>;
 }
 declare function createTtsConductor(config: TtsRuntimeConfig): TtsConductor;
@@ -268,5 +336,5 @@ declare function ttsGenerateFull(rawText: string, provider: TtsProvider, config:
 declare function getAudioDuration(audioBuffer: Buffer, ffmpegConfig?: FfmpegConfig, logger?: TtsLogger): Promise<number>;
 declare function estimateAudioDuration(audioBuffer: Buffer, bitrate?: number): number;
 //#endregion
-export { type BuildAudioOptions, type BuildFinalAudioResult, DEFAULT_PAUSE_TABLE, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerationResult, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, type TtsLogger, type TtsProvider, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, TtsQuotaExceededError, TtsRateLimitError, type TtsRuntimeConfig, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
+export { type BuildAudioOptions, type BuildFinalAudioResult, type CallOverridesFor, DEFAULT_PAUSE_TABLE, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerationResult, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, type TtsLogger, type TtsProvider, type TtsProviderCallOverridesRegistry, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, TtsQuotaExceededError, TtsRateLimitError, type TtsRuntimeConfig, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
 //# sourceMappingURL=index.d.mts.map

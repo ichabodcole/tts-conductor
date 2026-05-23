@@ -1,5 +1,6 @@
 import type { BuildAudioOptions, TtsRuntimeConfig } from './config';
 import type {
+  CallOverridesFor,
   ProviderOptionsFor,
   RegisteredProviderIds,
   TtsProviderContext,
@@ -9,10 +10,15 @@ import { ttsGenerateFull } from './operations';
 import type { TtsProvider } from './provider';
 import type { BuildFinalAudioResult } from './utils/stitcher';
 
-// Use a more flexible approach - store the factory with minimal typing
+// Storage erases the TCallOverrides generic for simplicity (Map can't carry
+// per-key types). createProvider reconstructs the typed view at access time
+// via the CallOverridesFor<T> mapping registered alongside provider options.
+// Using `unknown` (rather than `any`) at the storage boundary keeps the
+// internal surface honest — callers must go through createProvider, which
+// casts to the proper TtsProvider<CallOverridesFor<T>>.
 interface StoredFactory {
   id: string;
-  create: (ctx: TtsProviderContext, options: object) => TtsProvider;
+  create: (ctx: TtsProviderContext, options: object) => TtsProvider<unknown>;
 }
 
 export class TtsConductor {
@@ -28,10 +34,12 @@ export class TtsConductor {
    * Register a provider factory with type-safe options.
    * Provider must be registered in the TtsProviderRegistry via module augmentation.
    */
-  registerProvider<T extends RegisteredProviderIds>(factory: TtsProviderFactory<T>): T {
+  registerProvider<T extends RegisteredProviderIds, TCallOverrides = CallOverridesFor<T>>(
+    factory: TtsProviderFactory<T, TCallOverrides>,
+  ): T {
     this.providers.set(factory.id, {
       id: factory.id,
-      create: factory.create as (ctx: TtsProviderContext, options: object) => TtsProvider,
+      create: factory.create as (ctx: TtsProviderContext, options: object) => TtsProvider<unknown>,
     });
     this.config.logger?.debug?.('Registered provider', factory.id);
     return factory.id;
@@ -52,13 +60,15 @@ export class TtsConductor {
   createProvider<T extends RegisteredProviderIds>(
     id: T,
     options: ProviderOptionsFor<T>,
-  ): TtsProvider {
+  ): TtsProvider<CallOverridesFor<T>> {
     const factory = this.providers.get(id);
     if (!factory) {
       throw new Error(`Provider '${id}' is not registered`);
     }
     this.config.logger?.info?.('Creating provider instance', id, { options });
-    return factory.create({ config: this.config, id: factory.id }, options);
+    return factory.create({ config: this.config, id: factory.id }, options) as TtsProvider<
+      CallOverridesFor<T>
+    >;
   }
 
   async generateFull(

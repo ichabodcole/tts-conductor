@@ -558,9 +558,13 @@ function withTimeout(promise, ms, label) {
 async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 	const logger = config.logger;
 	const providerId = provider.id;
-	const segments = parseScript(rawText, config.pauses, logger);
+	const segments = parseScript(rawText, options?.pauses ?? config.pauses, logger);
 	logger?.info?.("[tts] Parsed segments", { count: segments.length });
-	const chunks = toChunks(segments, provider.caps, logger);
+	const callCap = options?.maxCharsPerRequest;
+	const chunks = toChunks(segments, callCap !== void 0 && callCap > 0 ? {
+		...provider.caps,
+		maxCharsPerRequest: callCap
+	} : provider.caps, logger);
 	logger?.info?.("[tts] Generated chunks", { count: chunks.length });
 	const audioParts = [];
 	let done = 0;

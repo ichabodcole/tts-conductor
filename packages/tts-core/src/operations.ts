@@ -33,10 +33,23 @@ export async function ttsGenerateFull(
   const logger = config.logger;
   const providerId = provider.id;
 
-  const segments = parseScript(rawText, config.pauses, logger);
+  // Per-call pause table overrides the runtime-config pause table when supplied
+  // (A1: multi-tenant pause vocabulary without per-tenant conductors).
+  const effectivePauses = options?.pauses ?? config.pauses;
+  const segments = parseScript(rawText, effectivePauses, logger);
   logger?.info?.('[tts] Parsed segments', { count: segments.length });
 
-  const chunks = toChunks(segments, provider.caps, logger);
+  // Per-call maxCharsPerRequest overrides the provider's declared cap when supplied
+  // (A5: latency / progress-granularity tuning without forking the provider).
+  // Non-positive values are treated as "no override" — passing 0 or a negative
+  // number would otherwise break chunking (every character becomes its own chunk
+  // or worse). Validating at the boundary keeps the rest of the pipeline simple.
+  const callCap = options?.maxCharsPerRequest;
+  const effectiveCaps =
+    callCap !== undefined && callCap > 0
+      ? { ...provider.caps, maxCharsPerRequest: callCap }
+      : provider.caps;
+  const chunks = toChunks(segments, effectiveCaps, logger);
   logger?.info?.('[tts] Generated chunks', { count: chunks.length });
 
   const audioParts: { buffer: Buffer; duration: number }[] = [];

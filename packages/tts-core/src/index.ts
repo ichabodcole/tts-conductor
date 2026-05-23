@@ -18,8 +18,10 @@ export {
   TtsTransientError,
 } from './errors';
 export type {
+  CallOverridesFor,
   ProviderOptionsFor,
   RegisteredProviderIds,
+  TtsProviderCallOverridesRegistry,
   TtsProviderContext,
   TtsProviderFactory,
   TtsProviderRegistry,

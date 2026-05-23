@@ -38,10 +38,39 @@ export interface ElevenLabsProviderOptions {
   quality?: ElevenLabsQuality;
 }
 
-// Register the ElevenLabs provider in the type registry
+/**
+ * Per-call overrides for `ElevenLabsProvider.generate()`. Carries the subset
+ * of construction-time options that are safe to vary per request — `apiKey`
+ * stays bound at construction since a different API key is conceptually a
+ * different provider instance.
+ *
+ * Useful for slot-versioning use cases (A/B testing a voice on the same
+ * source text, regenerating one segment with different settings) without
+ * spinning up a fresh provider instance per variation.
+ */
+export interface ElevenLabsCallOverrides {
+  voiceId?: string;
+  /**
+   * Per-call voice settings.
+   *
+   * **Replaces** the construction-time `voiceSettings` in full — this is NOT a
+   * shallow merge. If you pass `{ stability: 0.9 }`, any other construction-time
+   * settings (`speed`, `style`, `similarity_boost`, etc.) are dropped for this
+   * call. Pass every field you want active on the call, not just the ones you
+   * want to change. Full replacement keeps the override deterministic across
+   * future SDK additions.
+   */
+  voiceSettings?: ElevenLabsVoiceSettings;
+  quality?: ElevenLabsQuality;
+}
+
+// Register the ElevenLabs provider in the type registries
 declare module '@tts-conductor/core' {
   interface TtsProviderRegistry {
     '11labs': ElevenLabsProviderOptions;
+  }
+  interface TtsProviderCallOverridesRegistry {
+    '11labs': ElevenLabsCallOverrides;
   }
 }
 
@@ -51,7 +80,7 @@ const CAPS: ProviderCapabilities = {
   renderInlineBreak: (seconds: number) => `<break time="${seconds}s" />`,
 };
 
-class ElevenLabsProvider implements TtsProvider {
+class ElevenLabsProvider implements TtsProvider<ElevenLabsCallOverrides> {
   readonly id: string;
   readonly caps = CAPS;
   private client: ElevenLabsClient;
@@ -64,8 +93,13 @@ class ElevenLabsProvider implements TtsProvider {
     this.client = new ElevenLabsClient({ apiKey: options.apiKey });
   }
 
-  async generate(chunk: string): Promise<GenerationResult> {
-    const { voiceId, quality = 'standard', voiceSettings } = this.options;
+  async generate(chunk: string, overrides?: ElevenLabsCallOverrides): Promise<GenerationResult> {
+    // Per-call overrides win over construction-time options. apiKey is
+    // deliberately not part of ElevenLabsCallOverrides — a different API
+    // key is a different provider instance.
+    const voiceId = overrides?.voiceId ?? this.options.voiceId;
+    const quality = overrides?.quality ?? this.options.quality ?? 'standard';
+    const voiceSettings = overrides?.voiceSettings ?? this.options.voiceSettings;
     const logger = this.ctx.config.logger;
 
     const modelMap: Record<ElevenLabsQuality, string> = {
@@ -234,7 +268,7 @@ async function streamToBuffer(stream: ElevenLabsStream): Promise<Buffer> {
   });
 }
 
-export const elevenLabsProviderFactory: TtsProviderFactory<'11labs'> = {
+export const elevenLabsProviderFactory: TtsProviderFactory<'11labs', ElevenLabsCallOverrides> = {
   id: '11labs',
   create(ctx: TtsProviderContext, options: ElevenLabsProviderOptions) {
     if (!options.apiKey) {
