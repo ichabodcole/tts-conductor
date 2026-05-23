@@ -34,10 +34,10 @@ const result = await conductor.generateFull('Hello world', provider);
 
 ## Scripts
 
-- `pnpm build` – compile sources to `dist/`
-- `pnpm dev` – rebuild on change
-- `pnpm lint` – run ESLint over `src/`
-- `pnpm test` – run Vitest suite (tests TBD)
+- `bun run build` – compile sources to `dist/`
+- `bun run dev` – rebuild on change
+- `bun run lint` – run ESLint over `src/`
+- `bun run test` – run Vitest suite
 
 ## Requirements
 

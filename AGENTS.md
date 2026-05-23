@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This pnpm workspace hosts core orchestration and provider packages under `packages/`. Use `packages/tts-core/src` for reusable logic and utilities, `packages/tts-provider-elevenlabs/src` for ElevenLabs bindings, and the matching `__tests__` directories for Vitest suites. Distribution artifacts live in each package’s `dist/` folder and are regenerated via `pnpm --filter <pkg> build`.
+This Bun workspace hosts core orchestration and provider packages under `packages/`. Use `packages/tts-core/src` for reusable logic and utilities, `packages/tts-provider-elevenlabs/src` for ElevenLabs bindings, and the matching `__tests__` directories for Vitest suites. Distribution artifacts live in each package’s `dist/` folder and are regenerated via `bun --filter <pkg> run build`.
 
 - **Docs**: Documents related to the design, architecture and development of the application.
   - Sessions: see `docs/sessions` for a history of previous work session captures.
@@ -10,7 +10,7 @@ This pnpm workspace hosts core orchestration and provider packages under `packag
 
 ## Build, Test, and Development Commands
 
-Run `pnpm install` once to hydrate the workspace. Use `pnpm build` to invoke Turbo’s build pipeline across packages, `pnpm test` for the aggregated Vitest runs, and `pnpm --filter @tts-conductor/core test` (or another filter) to target a single package. Formatting is enforced with `pnpm format` (write) and `pnpm format:check` (CI-friendly). `pnpm lint` executes the shared ESLint configuration.
+Run `bun install` once to hydrate the workspace. Use `bun run build` to invoke Turbo’s build pipeline across packages, `bun run test` for the aggregated Vitest runs, and `bun --filter @tts-conductor/core run test` (or another filter) to target a single package. Formatting is enforced with `bun run format` (write) and `bun run format:check` (CI-friendly). `bun run lint` executes the shared ESLint configuration.
 
 ## Coding Style & Naming Conventions
 

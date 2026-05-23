@@ -62,7 +62,7 @@ class ElevenLabsProvider implements TtsProvider {
       high: 'eleven_multilingual_v2',
     };
 
-    const convertOptions: ElevenLabsTypes.TextToSpeechRequest = {
+    const convertOptions: ElevenLabsTypes.BodyTextToSpeechFull = {
       text: chunk,
       outputFormat: 'mp3_44100_128',
       modelId: modelMap[quality] ?? modelMap.standard,
