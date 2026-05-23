@@ -1,6 +1,49 @@
 import { Readable } from 'node:stream';
 import type { TtsProviderContext, TtsRuntimeConfig } from '@tts-conductor/core';
+import {
+  TtsAuthenticationError,
+  TtsError,
+  TtsInvalidInputError,
+  TtsQuotaExceededError,
+  TtsRateLimitError,
+  TtsTransientError,
+} from '@tts-conductor/core';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Minimal stand-ins for the ElevenLabs SDK error classes, so the adapter's
+// `instanceof ElevenLabsError` / `instanceof ElevenLabsTimeoutError` checks
+// work against test-injected errors. Mirrors the SDK's `rawResponse.headers`
+// shape so the retry-after extractor has something to read.
+class FakeElevenLabsError extends Error {
+  readonly statusCode?: number;
+  readonly body?: unknown;
+  readonly rawResponse?: { headers?: Record<string, string> };
+
+  constructor(opts: {
+    message?: string;
+    statusCode?: number;
+    body?: unknown;
+    rawResponse?: { headers?: Record<string, string> };
+  }) {
+    super(opts.message ?? 'fake');
+    // Mirror the real SDK's defensive Object.setPrototypeOf for instanceof
+    // safety under transpiled targets. Not strictly required here (we target
+    // ES2021), but keeps the fake faithful to the production class shape.
+    Object.setPrototypeOf(this, new.target.prototype);
+    this.name = 'ElevenLabsError';
+    this.statusCode = opts.statusCode;
+    this.body = opts.body;
+    this.rawResponse = opts.rawResponse;
+  }
+}
+
+class FakeElevenLabsTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    Object.setPrototypeOf(this, new.target.prototype);
+    this.name = 'ElevenLabsTimeoutError';
+  }
+}
 
 const convertHandler = vi.hoisted(() => vi.fn());
 const ElevenLabsClientMock = vi.hoisted(() =>
@@ -16,6 +59,8 @@ const ElevenLabsClientMock = vi.hoisted(() =>
 
 vi.mock('@elevenlabs/elevenlabs-js', () => ({
   ElevenLabsClient: ElevenLabsClientMock,
+  ElevenLabsError: FakeElevenLabsError,
+  ElevenLabsTimeoutError: FakeElevenLabsTimeoutError,
 }));
 
 const getAudioDurationMock = vi.hoisted(() => vi.fn().mockResolvedValue(1.5));
@@ -136,7 +181,7 @@ describe('ElevenLabsProvider', () => {
     expect(result.duration).toBe(2.5);
   });
 
-  it('throws with a descriptive error when ElevenLabs conversion fails', async () => {
+  it('wraps unknown errors in TtsError with a descriptive message', async () => {
     const { context, logger } = createContext();
     const failure = new Error('kaput');
     convertHandler.mockRejectedValue(failure);
@@ -146,10 +191,101 @@ describe('ElevenLabsProvider', () => {
       voiceId: 'voice',
     });
 
+    await expect(provider.generate('<speak>Oops</speak>')).rejects.toBeInstanceOf(TtsError);
     await expect(provider.generate('<speak>Oops</speak>')).rejects.toThrow(
       'ElevenLabs generation failed: kaput',
     );
-    expect(logger.error).toHaveBeenCalledWith('[11labs] generation error', { message: 'kaput' });
+    expect(logger.error).toHaveBeenCalledWith(
+      '[11labs] generation error',
+      expect.objectContaining({ kind: 'TtsError' }),
+    );
     expect(getAudioDurationMock).not.toHaveBeenCalled();
+  });
+
+  describe('error mapping', () => {
+    async function tryGenerate(sdkError: unknown): Promise<unknown> {
+      const { context } = createContext();
+      convertHandler.mockRejectedValue(sdkError);
+      const provider = elevenLabsProviderFactory.create(context, {
+        apiKey: 'key',
+        voiceId: 'voice',
+      });
+      try {
+        await provider.generate('<speak>x</speak>');
+      } catch (err) {
+        return err;
+      }
+      throw new Error('expected generate() to throw');
+    }
+
+    it('maps 401 to TtsAuthenticationError', async () => {
+      const err = await tryGenerate(
+        new FakeElevenLabsError({ message: 'bad key', statusCode: 401 }),
+      );
+      expect(err).toBeInstanceOf(TtsAuthenticationError);
+      expect((err as TtsAuthenticationError).statusCode).toBe(401);
+    });
+
+    it('maps 403 to TtsQuotaExceededError', async () => {
+      const err = await tryGenerate(
+        new FakeElevenLabsError({ message: 'tier exhausted', statusCode: 403 }),
+      );
+      expect(err).toBeInstanceOf(TtsQuotaExceededError);
+    });
+
+    it('maps 429 to TtsRateLimitError without Retry-After', async () => {
+      const err = await tryGenerate(
+        new FakeElevenLabsError({ message: 'slow down', statusCode: 429 }),
+      );
+      expect(err).toBeInstanceOf(TtsRateLimitError);
+      expect((err as TtsRateLimitError).retryAfterMs).toBeUndefined();
+    });
+
+    it('maps 429 to TtsRateLimitError and parses Retry-After seconds', async () => {
+      const err = await tryGenerate(
+        new FakeElevenLabsError({
+          message: 'slow down',
+          statusCode: 429,
+          rawResponse: { headers: { 'retry-after': '30' } },
+        }),
+      );
+      expect(err).toBeInstanceOf(TtsRateLimitError);
+      expect((err as TtsRateLimitError).retryAfterMs).toBe(30000);
+    });
+
+    it('maps 500/502/503 to TtsTransientError', async () => {
+      for (const status of [500, 502, 503]) {
+        const err = await tryGenerate(
+          new FakeElevenLabsError({ message: 'upstream', statusCode: status }),
+        );
+        expect(err).toBeInstanceOf(TtsTransientError);
+      }
+    });
+
+    it('maps 400 and 422 to TtsInvalidInputError', async () => {
+      for (const status of [400, 422]) {
+        const err = await tryGenerate(
+          new FakeElevenLabsError({ message: 'bad input', statusCode: status }),
+        );
+        expect(err).toBeInstanceOf(TtsInvalidInputError);
+      }
+    });
+
+    it('maps timeout to TtsTransientError', async () => {
+      const err = await tryGenerate(new FakeElevenLabsTimeoutError('took too long'));
+      expect(err).toBeInstanceOf(TtsTransientError);
+    });
+
+    it('maps SDK errors with no statusCode to TtsTransientError', async () => {
+      const err = await tryGenerate(new FakeElevenLabsError({ message: 'network dropped' }));
+      expect(err).toBeInstanceOf(TtsTransientError);
+      expect((err as TtsTransientError).statusCode).toBeUndefined();
+    });
+
+    it('preserves the original error as cause', async () => {
+      const sdkError = new FakeElevenLabsError({ message: 'x', statusCode: 500 });
+      const err = await tryGenerate(sdkError);
+      expect((err as TtsError).cause).toBe(sdkError);
+    });
   });
 });

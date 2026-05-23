@@ -1,5 +1,6 @@
 import type { BuildAudioOptions, TtsRuntimeConfig } from './config';
 import { ProcessStage } from './config';
+import { TtsTransientError } from './errors';
 import type { TtsProvider } from './provider';
 import type { Chunk } from './utils/chunker';
 import { toChunks } from './utils/chunker';
@@ -13,7 +14,7 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
   let timer: NodeJS.Timeout;
   const timeoutPromise = new Promise<T>((_, reject) => {
     timer = setTimeout(() => {
-      reject(new Error(`[tts] Timeout after ${ms}ms during ${label}`));
+      reject(new TtsTransientError(`[tts] Timeout after ${ms}ms during ${label}`));
     }, ms);
   });
 

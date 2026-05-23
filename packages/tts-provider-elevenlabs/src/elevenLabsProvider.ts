@@ -1,5 +1,9 @@
 import type { ElevenLabs as ElevenLabsTypes } from '@elevenlabs/elevenlabs-js';
-import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
+import {
+  ElevenLabsClient,
+  ElevenLabsError,
+  ElevenLabsTimeoutError,
+} from '@elevenlabs/elevenlabs-js';
 import type {
   GenerationResult,
   ProviderCapabilities,
@@ -7,7 +11,15 @@ import type {
   TtsProviderContext,
   TtsProviderFactory,
 } from '@tts-conductor/core';
-import { getAudioDuration } from '@tts-conductor/core';
+import {
+  getAudioDuration,
+  TtsAuthenticationError,
+  TtsError,
+  TtsInvalidInputError,
+  TtsQuotaExceededError,
+  TtsRateLimitError,
+  TtsTransientError,
+} from '@tts-conductor/core';
 
 export interface ElevenLabsVoiceSettings {
   stability?: number | null;
@@ -90,11 +102,105 @@ class ElevenLabsProvider implements TtsProvider {
         size: buffer.length,
       };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger?.error?.('[11labs] generation error', { message });
-      throw new Error(`ElevenLabs generation failed: ${message}`);
+      const mapped = mapElevenLabsError(error);
+      logger?.error?.('[11labs] generation error', {
+        message: mapped.message,
+        kind: mapped.name,
+        statusCode: mapped.statusCode,
+      });
+      throw mapped;
     }
   }
+}
+
+/**
+ * Convert an error thrown by the ElevenLabs SDK into one of the `@tts-conductor/core`
+ * error classes, so consumers can apply uniform retry / classification logic without
+ * parsing message strings.
+ *
+ * Mapping (HTTP status → class):
+ * - 401 → `TtsAuthenticationError` (bad/missing API key)
+ * - 403 → `TtsQuotaExceededError` (subscription tier exhausted — ElevenLabs uses 403, not 402, for this)
+ * - 429 → `TtsRateLimitError` (with `retryAfterMs` parsed from the Retry-After header if present)
+ * - 5xx → `TtsTransientError` (retry with backoff)
+ * - 400, 422, other 4xx → `TtsInvalidInputError` (do not retry without changing input)
+ * - `ElevenLabsError` with no `statusCode` → `TtsTransientError` (network failure, ambiguous shape)
+ * - `ElevenLabsTimeoutError` → `TtsTransientError`
+ * - Anything else → `TtsError` (base class; unclassified)
+ */
+function mapElevenLabsError(error: unknown): TtsError {
+  if (error instanceof ElevenLabsTimeoutError) {
+    return new TtsTransientError(`ElevenLabs request timed out: ${error.message}`, {
+      cause: error,
+    });
+  }
+
+  if (error instanceof ElevenLabsError) {
+    const status = error.statusCode;
+    const message = `ElevenLabs ${status ?? 'request'} failed: ${error.message}`;
+    const opts = { cause: error, statusCode: status };
+
+    if (status === undefined) {
+      return new TtsTransientError(message, opts);
+    }
+    if (status === 401) return new TtsAuthenticationError(message, opts);
+    if (status === 403) return new TtsQuotaExceededError(message, opts);
+    if (status === 429) {
+      return new TtsRateLimitError(message, {
+        ...opts,
+        retryAfterMs: extractRetryAfterMs(error),
+      });
+    }
+    if (status >= 500) return new TtsTransientError(message, opts);
+    if (status >= 400) return new TtsInvalidInputError(message, opts);
+    return new TtsError(message, opts);
+  }
+
+  const message = error instanceof Error ? error.message : String(error);
+  return new TtsError(`ElevenLabs generation failed: ${message}`, { cause: error });
+}
+
+/**
+ * Parse a Retry-After header value into milliseconds. The header may be either a number
+ * of seconds (e.g., `"30"`) or an HTTP date. Returns undefined if the header is absent,
+ * unparseable, or the rawResponse is not available.
+ */
+function extractRetryAfterMs(error: ElevenLabsError): number | undefined {
+  const headers = error.rawResponse?.headers;
+  if (!headers) return undefined;
+
+  const raw = readHeader(headers, 'retry-after');
+  if (raw === undefined) return undefined;
+
+  const seconds = Number.parseFloat(raw);
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return Math.round(seconds * 1000);
+  }
+
+  const epochMs = Date.parse(raw);
+  if (!Number.isNaN(epochMs)) {
+    const diff = epochMs - Date.now();
+    // Past or now: most likely server clock skew. Return undefined so callers
+    // fall back to their own backoff policy rather than retrying immediately
+    // (which could hammer a server that hasn't actually cooled down).
+    return diff > 0 ? diff : undefined;
+  }
+
+  return undefined;
+}
+
+function readHeader(headers: unknown, name: string): string | undefined {
+  // Headers can be a Fetch `Headers` instance or a plain record depending on SDK internals.
+  if (headers && typeof (headers as Headers).get === 'function') {
+    return (headers as Headers).get(name) ?? undefined;
+  }
+  if (headers && typeof headers === 'object') {
+    const record = headers as Record<string, string | string[] | undefined>;
+    const value = record[name] ?? record[name.toLowerCase()];
+    if (Array.isArray(value)) return value[0];
+    return value;
+  }
+  return undefined;
 }
 
 type ElevenLabsStream = ReadableStream<Uint8Array> | NodeJS.ReadableStream;

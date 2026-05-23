@@ -168,6 +168,15 @@ async function concatParts(
 }
 
 export interface BuildFinalAudioResult {
+  /** Final assembled audio as a Buffer. This is the primary way to read the result. */
+  audio: Buffer;
+  /**
+   * Base64-encoded copy of `audio`, kept for backward compatibility with consumers that
+   * cannot accept Buffers (e.g., JSON-only transport boundaries).
+   *
+   * @deprecated Prefer reading `audio` directly. This field will be removed in v2.0.
+   *   Consumers that need base64 should call `result.audio.toString('base64')` themselves.
+   */
   base64Data: string;
   mimeType: string;
   size: number;
@@ -244,6 +253,7 @@ export async function buildFinalAudio(
     }, 0);
 
     const result: BuildFinalAudioResult = {
+      audio: buf,
       base64Data: buf.toString('base64'),
       mimeType: 'audio/mpeg',
       size: buf.length,

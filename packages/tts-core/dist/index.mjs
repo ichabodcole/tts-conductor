@@ -1,20 +1,102 @@
+import fs from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { execa } from "execa";
 import ffmpegPath from "ffmpeg-static";
-import fs from "fs/promises";
-import path from "path";
-import { tmpdir } from "os";
-
 //#region src/config.ts
-let ProcessStage = /* @__PURE__ */ function(ProcessStage$1) {
+let ProcessStage = /* @__PURE__ */ function(ProcessStage) {
 	/** Individual audio chunks from providers */
-	ProcessStage$1["Raw"] = "raw";
+	ProcessStage["Raw"] = "raw";
 	/** Final assembled audio after stitching */
-	ProcessStage$1["Final"] = "final";
+	ProcessStage["Final"] = "final";
 	/** Fallback stage when not specified by caller */
-	ProcessStage$1["Unknown"] = "unknown";
-	return ProcessStage$1;
+	ProcessStage["Unknown"] = "unknown";
+	return ProcessStage;
 }({});
-
+//#endregion
+//#region src/errors.ts
+/**
+* Error hierarchy for TTS provider failures. Adapters convert SDK-specific errors
+* to these classes so consumers can apply uniform retry / classification logic
+* without parsing error messages.
+*
+* Consumers should use `instanceof` checks rather than string matching:
+*
+* ```ts
+* try {
+*   await provider.generate(chunk);
+* } catch (err) {
+*   if (err instanceof TtsRateLimitError) {
+*     await sleep(err.retryAfterMs ?? 1000);
+*     // retry
+*   } else if (err instanceof TtsTransientError) {
+*     // exponential backoff
+*   } else if (err instanceof TtsInvalidInputError) {
+*     // do not retry; surface to caller
+*   }
+* }
+* ```
+*/
+/** Base class for all TTS provider errors. Direct instances signal an unclassified failure. */
+var TtsError = class extends Error {
+	constructor(message, options) {
+		super(message);
+		this.name = "TtsError";
+		this.cause = options?.cause;
+		this.statusCode = options?.statusCode;
+	}
+};
+/**
+* Provider rejected the request because the caller has exceeded a rate limit.
+* Retry after `retryAfterMs` if supplied, otherwise apply caller-default backoff.
+*/
+var TtsRateLimitError = class extends TtsError {
+	constructor(message, options) {
+		super(message, options);
+		this.name = "TtsRateLimitError";
+		this.retryAfterMs = options?.retryAfterMs;
+	}
+};
+/**
+* Provider rejected the request because the caller has exhausted their quota or
+* subscription tier. Retrying without consumer action (upgrade, top-up) will keep failing.
+*/
+var TtsQuotaExceededError = class extends TtsError {
+	constructor(message, options) {
+		super(message, options);
+		this.name = "TtsQuotaExceededError";
+	}
+};
+/**
+* Provider rejected the credentials. The API key is missing, invalid, or revoked.
+* Retrying will not help until the caller fixes their authentication.
+*/
+var TtsAuthenticationError = class extends TtsError {
+	constructor(message, options) {
+		super(message, options);
+		this.name = "TtsAuthenticationError";
+	}
+};
+/**
+* Provider failure that is expected to resolve on retry: 5xx responses, network errors,
+* upstream timeouts, transient connectivity issues. Safe to retry with exponential backoff.
+*/
+var TtsTransientError = class extends TtsError {
+	constructor(message, options) {
+		super(message, options);
+		this.name = "TtsTransientError";
+	}
+};
+/**
+* Provider rejected the request because the input was malformed or unprocessable.
+* Retrying with the same input will not help; the caller must fix the input.
+*/
+var TtsInvalidInputError = class extends TtsError {
+	constructor(message, options) {
+		super(message, options);
+		this.name = "TtsInvalidInputError";
+	}
+};
 //#endregion
 //#region src/utils/chunker.ts
 function splitByBoundaries(input, maxLen) {
@@ -38,8 +120,7 @@ function splitByBoundaries(input, maxLen) {
 		if (splitPos < 0) {
 			const sentenceRe = /[.!?](?=\s|$)/g;
 			let lastEnd = -1;
-			let m;
-			while (m = sentenceRe.exec(window)) lastEnd = m.index + 1;
+			for (const m of window.matchAll(sentenceRe)) lastEnd = (m.index ?? 0) + 1;
 			if (lastEnd >= 0) splitPos = lastEnd;
 		}
 		if (splitPos < 0) splitPos = window.lastIndexOf(" ");
@@ -55,7 +136,7 @@ function splitByBoundaries(input, maxLen) {
 function toChunks(segments, caps, logger) {
 	const INLINE_LIMIT = caps.maxInlineBreakSeconds ?? 0;
 	const renderInlineBreak = caps.renderInlineBreak ?? ((seconds) => `<break time="${seconds}s" />`);
-	const MAX_CHARS = typeof caps.maxCharsPerRequest === "number" && isFinite(caps.maxCharsPerRequest) ? Math.max(1, caps.maxCharsPerRequest - 16) : void 0;
+	const MAX_CHARS = typeof caps.maxCharsPerRequest === "number" && Number.isFinite(caps.maxCharsPerRequest) ? Math.max(1, caps.maxCharsPerRequest - 16) : void 0;
 	const chunks = [];
 	let buffer = "";
 	let postPause = 0;
@@ -70,7 +151,7 @@ function toChunks(segments, caps, logger) {
 		}
 	};
 	for (const seg of segments) if (seg.kind === "text") {
-		const next = (buffer ? buffer + " " : "") + seg.value;
+		const next = (buffer ? `${buffer} ` : "") + seg.value;
 		if (MAX_CHARS && next.length > MAX_CHARS) {
 			const parts = splitByBoundaries(next, MAX_CHARS);
 			for (let i = 0; i < parts.length - 1; i++) {
@@ -95,14 +176,13 @@ function toChunks(segments, caps, logger) {
 	logger?.debug?.("[tts] toChunks result", chunks);
 	return chunks;
 }
-
 //#endregion
 //#region src/utils/debug.ts
 function buildMeta(options) {
 	return {
 		fileName: options.fileName ?? `tts_${Date.now()}.mp3`,
 		jobId: options.jobId,
-		stage: options.stage ?? ProcessStage.Unknown
+		stage: options.stage ?? "unknown"
 	};
 }
 async function saveDebugFromBuffer(config, buffer, options = {}) {
@@ -111,13 +191,12 @@ async function saveDebugFromBuffer(config, buffer, options = {}) {
 	const meta = buildMeta(options);
 	await sink.saveBuffer(buffer, meta);
 }
-async function saveDebugFromFile(config, path$1, options = {}) {
+async function saveDebugFromFile(config, path, options = {}) {
 	const sink = config.debug;
 	if (!sink?.saveFile) return;
 	const meta = buildMeta(options);
-	await sink.saveFile(path$1, meta);
+	await sink.saveFile(path, meta);
 }
-
 //#endregion
 //#region src/utils/duration.ts
 async function resolveFfprobeBin(ffmpegConfig) {
@@ -183,7 +262,6 @@ async function getAudioDuration(audioBuffer, ffmpegConfig, logger) {
 function estimateAudioDuration(audioBuffer, bitrate = 128) {
 	return Math.round(audioBuffer.length * 8 / (bitrate * 1e3) * 100) / 100;
 }
-
 //#endregion
 //#region src/utils/pause.ts
 function lookup(table, label) {
@@ -223,18 +301,16 @@ function isValidPauseFormat(input) {
 function extractPauseMarkers(text) {
 	return text.match(/\[PAUSE:([A-Z_]+(?::\d+(?:\.\d+)?[xs]?)?|\d+(?:\.\d+)?s?)\]/gi) ?? [];
 }
-
 //#endregion
 //#region src/utils/segmenter.ts
 const PAUSE_RE = /\[PAUSE:([A-Z_]+(?::\d+(?:\.\d+)?[xs]?)?|\d+(?:\.\d+)?s?)\]/gi;
 function parseScript(input, table, logger) {
-	PAUSE_RE.lastIndex = 0;
 	const segments = [];
 	let lastIndex = 0;
-	let match;
-	while (match = PAUSE_RE.exec(input)) {
-		if (match.index > lastIndex) {
-			const textContent = input.slice(lastIndex, match.index).trim();
+	for (const match of input.matchAll(PAUSE_RE)) {
+		const matchIndex = match.index ?? 0;
+		if (matchIndex > lastIndex) {
+			const textContent = input.slice(lastIndex, matchIndex).trim();
 			if (textContent) segments.push({
 				kind: "text",
 				value: textContent
@@ -249,7 +325,7 @@ function parseScript(input, table, logger) {
 			label,
 			seconds
 		});
-		lastIndex = PAUSE_RE.lastIndex;
+		lastIndex = matchIndex + fullMatch.length;
 	}
 	if (lastIndex < input.length) {
 		const textContent = input.slice(lastIndex).trim();
@@ -281,7 +357,6 @@ function parseScript(input, table, logger) {
 	logger?.debug?.("[tts] parseScript output", segments);
 	return segments;
 }
-
 //#endregion
 //#region src/utils/stitcher.ts
 const silenceCache = /* @__PURE__ */ new Map();
@@ -439,7 +514,7 @@ async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now
 		await saveDebugFromFile(config, outPath, {
 			fileName: `final_${fileName}`,
 			jobId: options?.debugJobId,
-			stage: ProcessStage.Final
+			stage: "final"
 		});
 		const buf = await fs.readFile(outPath);
 		const durationSec = audio.reduce((sum, part, idx) => {
@@ -447,6 +522,7 @@ async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now
 			return sum + part.duration + pause;
 		}, 0);
 		const result = {
+			audio: buf,
 			base64Data: buf.toString("base64"),
 			mimeType: "audio/mpeg",
 			size: buf.length,
@@ -466,14 +542,13 @@ async function cleanupTempFiles(filePaths) {
 		} catch {}
 	}));
 }
-
 //#endregion
 //#region src/operations.ts
 function withTimeout(promise, ms, label) {
 	let timer;
 	const timeoutPromise = new Promise((_, reject) => {
 		timer = setTimeout(() => {
-			reject(/* @__PURE__ */ new Error(`[tts] Timeout after ${ms}ms during ${label}`));
+			reject(new TtsTransientError(`[tts] Timeout after ${ms}ms during ${label}`));
 		}, ms);
 	});
 	return Promise.race([promise, timeoutPromise]).finally(() => {
@@ -508,7 +583,7 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 		await saveDebugFromBuffer(config, res.audio, {
 			fileName: `raw_${providerId}_${i}_${Date.now()}.mp3`,
 			jobId: options?.debugJobId,
-			stage: ProcessStage.Raw
+			stage: "raw"
 		});
 		const chunkProgress = Math.round(done / chunks.length * 80);
 		onProgress?.(chunkProgress);
@@ -518,7 +593,6 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 	onProgress?.(100);
 	return final;
 }
-
 //#endregion
 //#region src/conductor.ts
 var TtsConductor = class {
@@ -567,7 +641,6 @@ var TtsConductor = class {
 function createTtsConductor(config) {
 	return new TtsConductor(config);
 }
-
 //#endregion
 //#region src/defaults.ts
 const DEFAULT_PAUSE_TABLE = {
@@ -580,7 +653,7 @@ const DEFAULT_PAUSE_TABLE = {
 	SETTLE: 10,
 	BREATH: 5
 };
-
 //#endregion
-export { DEFAULT_PAUSE_TABLE, ProcessStage, TtsConductor, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
+export { DEFAULT_PAUSE_TABLE, ProcessStage, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, TtsQuotaExceededError, TtsRateLimitError, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
+
 //# sourceMappingURL=index.mjs.map

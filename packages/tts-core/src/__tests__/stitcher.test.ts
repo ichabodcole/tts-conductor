@@ -55,13 +55,22 @@ describe('buildFinalAudio', () => {
     ).rejects.toThrowError('chunks and audio arrays must be equal length');
   });
 
-  it('returns base64 payload when ffmpeg succeeds', async () => {
+  it('returns a Buffer payload when ffmpeg succeeds', async () => {
     const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
     const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
     const result = await buildFinalAudio(config, chunks, audio, 'test.mp3');
     expect(result.mimeType).toBe('audio/mpeg');
-    expect(result.base64Data.length).toBeGreaterThan(0);
+    expect(Buffer.isBuffer(result.audio)).toBe(true);
+    expect(result.audio.length).toBeGreaterThan(0);
+    expect(result.size).toBe(result.audio.length);
     expect(getExecaMock()).toHaveBeenCalled();
+  });
+
+  it('still exposes base64Data alongside the Buffer for backcompat', async () => {
+    const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+    const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+    const result = await buildFinalAudio(config, chunks, audio, 'test.mp3');
+    expect(result.base64Data).toBe(result.audio.toString('base64'));
   });
 
   it('reuses cached silence files for identical pause durations', async () => {

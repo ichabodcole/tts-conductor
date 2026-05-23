@@ -9,6 +9,14 @@ export type {
 } from './config';
 export { ProcessStage } from './config';
 export { DEFAULT_PAUSE_TABLE } from './defaults';
+export {
+  TtsAuthenticationError,
+  TtsError,
+  TtsInvalidInputError,
+  TtsQuotaExceededError,
+  TtsRateLimitError,
+  TtsTransientError,
+} from './errors';
 export type {
   ProviderOptionsFor,
   RegisteredProviderIds,
