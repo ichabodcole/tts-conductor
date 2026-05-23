@@ -90,7 +90,7 @@ describe('ttsGenerateFull', () => {
       runtimeConfig.logger,
     );
     expect(toChunksMock).toHaveBeenCalled();
-    expect(generateSpy).toHaveBeenCalledWith('<speak>Hello world</speak>');
+    expect(generateSpy).toHaveBeenCalledWith('<speak>Hello world</speak>', { signal: undefined });
     // Provider supplies duration, so ffprobe should not be called
     expect(getAudioDurationMock).not.toHaveBeenCalled();
     expect(saveDebugFromBufferMock).toHaveBeenCalledWith(
@@ -169,6 +169,7 @@ describe('ttsGenerateFull', () => {
       expect.any(Buffer),
       runtimeConfig.ffmpeg,
       runtimeConfig.logger,
+      undefined, // signal — none supplied
     );
   });
 
@@ -220,6 +221,57 @@ describe('ttsGenerateFull', () => {
       expect.anything(),
       provider.caps,
       runtimeConfig.logger,
+    );
+  });
+
+  it('throws AbortError immediately when the signal is already aborted (A3)', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    // Assert the error TYPE, not just that something was thrown — a wrong-error
+    // regression (e.g., the abort getting wrapped into TtsError) would otherwise
+    // silently pass this test.
+    await expect(
+      ttsGenerateFull('Hello', provider, runtimeConfig, undefined, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    // No upstream call should have happened — we bailed before parseScript ran.
+    expect(parseScriptMock).not.toHaveBeenCalled();
+  });
+
+  it('forwards the signal to provider.generate (A3)', async () => {
+    const controller = new AbortController();
+    const generateSpy = vi.spyOn(provider, 'generate');
+
+    await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+      signal: controller.signal,
+    });
+
+    expect(generateSpy).toHaveBeenCalledWith(
+      '<speak>Hello world</speak>',
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
+
+  it('forwards the signal to getAudioDuration when provider omits duration (A3)', async () => {
+    const providerWithoutDuration: TtsProvider = {
+      id: 'no-duration-provider',
+      caps: provider.caps,
+      async generate() {
+        return { audio: Buffer.from('fake') };
+      },
+    };
+    const controller = new AbortController();
+
+    await ttsGenerateFull('Hello', providerWithoutDuration, runtimeConfig, undefined, {
+      signal: controller.signal,
+    });
+
+    expect(getAudioDurationMock).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      runtimeConfig.ffmpeg,
+      runtimeConfig.logger,
+      controller.signal,
     );
   });
 });

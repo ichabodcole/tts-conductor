@@ -5,6 +5,7 @@ import {
   ElevenLabsTimeoutError,
 } from '@elevenlabs/elevenlabs-js';
 import type {
+  GenerateCallOptions,
   GenerationResult,
   ProviderCapabilities,
   TtsProvider,
@@ -93,10 +94,17 @@ class ElevenLabsProvider implements TtsProvider<ElevenLabsCallOverrides> {
     this.client = new ElevenLabsClient({ apiKey: options.apiKey });
   }
 
-  async generate(chunk: string, overrides?: ElevenLabsCallOverrides): Promise<GenerationResult> {
+  async generate(
+    chunk: string,
+    options?: GenerateCallOptions<ElevenLabsCallOverrides>,
+  ): Promise<GenerationResult> {
     // Per-call overrides win over construction-time options. apiKey is
     // deliberately not part of ElevenLabsCallOverrides — a different API
     // key is a different provider instance.
+    const overrides = options?.overrides;
+    const signal = options?.signal;
+    signal?.throwIfAborted();
+
     const voiceId = overrides?.voiceId ?? this.options.voiceId;
     const quality = overrides?.quality ?? this.options.quality ?? 'standard';
     const voiceSettings = overrides?.voiceSettings ?? this.options.voiceSettings;
@@ -121,12 +129,14 @@ class ElevenLabsProvider implements TtsProvider<ElevenLabsCallOverrides> {
     logger?.info?.('[11labs] convert start', { voiceId, modelId: convertOptions.modelId });
 
     try {
-      const audioStream = await this.client.textToSpeech.convert(voiceId, convertOptions);
+      const audioStream = await this.client.textToSpeech.convert(voiceId, convertOptions, {
+        abortSignal: signal,
+      });
       const buffer = await streamToBuffer(audioStream);
 
       logger?.info?.('[11labs] convert done', { bytes: buffer.length });
 
-      const duration = await getAudioDuration(buffer, this.ctx.config.ffmpeg, logger);
+      const duration = await getAudioDuration(buffer, this.ctx.config.ffmpeg, logger, signal);
       logger?.info?.('[11labs] duration', { duration });
 
       return {
@@ -136,6 +146,12 @@ class ElevenLabsProvider implements TtsProvider<ElevenLabsCallOverrides> {
         size: buffer.length,
       };
     } catch (error) {
+      // Aborts are not failures. Propagate the native AbortError so consumers
+      // can distinguish cancellation from a real generation failure (BullMQ
+      // workers, retry logic, error counters, etc. all care about this).
+      if (signal?.aborted || isAbortError(error)) {
+        throw error;
+      }
       const mapped = mapElevenLabsError(error);
       logger?.error?.('[11labs] generation error', {
         message: mapped.message,
@@ -145,6 +161,16 @@ class ElevenLabsProvider implements TtsProvider<ElevenLabsCallOverrides> {
       throw mapped;
     }
   }
+}
+
+/**
+ * Detect a native AbortError. Covers both `DOMException` aborts (modern Node
+ * fetch) and Node-style errors with `name === 'AbortError'` (execa, older
+ * runtimes). Useful when we don't have access to the controlling signal but
+ * still need to recognize cancellation in a catch block.
+ */
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 /**

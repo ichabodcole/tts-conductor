@@ -227,7 +227,7 @@ async function resolveFfmpegBin$1(ffmpegConfig) {
 	} catch {}
 	return "ffmpeg";
 }
-async function getAudioDuration(audioBuffer, ffmpegConfig, logger) {
+async function getAudioDuration(audioBuffer, ffmpegConfig, logger, signal) {
 	const tempFile = path.join(tmpdir(), `tts_conductor_temp_${Date.now()}.mp3`);
 	try {
 		await fs.writeFile(tempFile, audioBuffer);
@@ -239,10 +239,16 @@ async function getAudioDuration(audioBuffer, ffmpegConfig, logger) {
 			"-of",
 			"default=noprint_wrappers=1:nokey=1",
 			tempFile
-		], { reject: false })).stdout?.toString().trim() ?? "";
+		], {
+			reject: false,
+			cancelSignal: signal
+		})).stdout?.toString().trim() ?? "";
 		const parsedProbe = parseFloat(probeOut);
 		if (!Number.isNaN(parsedProbe) && parsedProbe > 0) return Math.round(parsedProbe * 100) / 100;
-		const match = ((await execa(await resolveFfmpegBin$1(ffmpegConfig), ["-i", tempFile], { reject: false })).stderr?.toString() ?? "").match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+		const match = ((await execa(await resolveFfmpegBin$1(ffmpegConfig), ["-i", tempFile], {
+			reject: false,
+			cancelSignal: signal
+		})).stderr?.toString() ?? "").match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
 		if (match) {
 			const hours = parseInt(match[1] ?? "0", 10);
 			const minutes = parseInt(match[2] ?? "0", 10);
@@ -378,7 +384,7 @@ async function resolveFfmpegBin(ffmpegConfig) {
 	} catch {}
 	return "ffmpeg";
 }
-async function genSilenceWav(seconds, ffmpegConfig, logger) {
+async function genSilenceWav(seconds, ffmpegConfig, logger, signal) {
 	if (silenceCache.has(seconds)) return silenceCache.get(seconds);
 	const out = path.join(tmpdir(), `tts_conductor_silence_${seconds}.wav`);
 	const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
@@ -398,7 +404,10 @@ async function genSilenceWav(seconds, ffmpegConfig, logger) {
 			"pcm_s16le",
 			"-y",
 			out
-		], { timeout: 3e4 });
+		], {
+			timeout: 3e4,
+			cancelSignal: signal
+		});
 	} catch (error) {
 		logger?.error?.("Failed to generate silence segment", {
 			seconds,
@@ -420,7 +429,7 @@ async function genSilenceWav(seconds, ffmpegConfig, logger) {
 	silenceCache.set(seconds, out);
 	return out;
 }
-async function concatParts(fileList, outPath, ffmpegConfig, logger) {
+async function concatParts(fileList, outPath, ffmpegConfig, logger, signal) {
 	const listFile = path.join(tmpdir(), `tts_conductor_concat_${Date.now()}.txt`);
 	try {
 		await fs.writeFile(listFile, fileList.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
@@ -441,16 +450,23 @@ async function concatParts(fileList, outPath, ffmpegConfig, logger) {
 				"1",
 				"-y",
 				outPath
-			], { timeout: 45e3 });
+			], {
+				timeout: 45e3,
+				cancelSignal: signal
+			});
 			return;
 		} catch (error) {
+			if (signal?.aborted) throw error;
 			logger?.warn?.("Concat demuxer failed, attempting filter fallback", error);
 			const args = [];
 			for (const file of fileList) args.push("-i", file);
 			const n = fileList.length;
 			const filter = `${Array.from({ length: n }, (_, i) => `[${i}:a]`).join("")}concat=n=${n}:v=0:a=1, aformat=sample_fmts=s16:sample_rates=44100:channel_layouts=mono [a]`;
 			args.push("-filter_complex", filter, "-map", "[a]", "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "1", "-y", outPath);
-			await execa(ffmpegBin, args, { timeout: 6e4 });
+			await execa(ffmpegBin, args, {
+				timeout: 6e4,
+				cancelSignal: signal
+			});
 		}
 	} finally {
 		try {
@@ -464,12 +480,15 @@ async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now
 	if (chunks.length !== audio.length) throw new Error("chunks and audio arrays must be equal length");
 	const logger = config.logger;
 	const ffmpegConfig = config.ffmpeg;
+	const signal = options?.signal;
 	const tmp = tmpdir();
 	const partFiles = [];
 	const tempFilesToCleanup = [];
 	try {
+		signal?.throwIfAborted();
 		const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
 		for (let i = 0; i < audio.length; i++) {
+			signal?.throwIfAborted();
 			const speechMp3 = path.join(tmp, `tts_chunk_${i}_${Date.now()}.mp3`);
 			const speechWav = path.join(tmp, `tts_chunk_${i}_${Date.now()}.wav`);
 			await fs.writeFile(speechMp3, audio[i]?.buffer ?? Buffer.alloc(0));
@@ -485,18 +504,22 @@ async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now
 				"pcm_s16le",
 				"-y",
 				speechWav
-			], { timeout: 3e4 });
+			], {
+				timeout: 3e4,
+				cancelSignal: signal
+			});
 			partFiles.push(speechWav);
 			tempFilesToCleanup.push(speechWav);
 			const pauseSeconds = chunks[i]?.postPause ?? 0;
 			if (pauseSeconds > 0) {
-				const silenceFile = await genSilenceWav(pauseSeconds, ffmpegConfig, logger);
+				const silenceFile = await genSilenceWav(pauseSeconds, ffmpegConfig, logger, signal);
 				partFiles.push(silenceFile);
 			}
 		}
+		signal?.throwIfAborted();
 		const outWavPath = path.join(tmp, `tts_concat_${Date.now()}.wav`);
 		tempFilesToCleanup.push(outWavPath);
-		await concatParts(partFiles, outWavPath, ffmpegConfig, logger);
+		await concatParts(partFiles, outWavPath, ffmpegConfig, logger, signal);
 		const outPath = path.join(tmp, fileName);
 		tempFilesToCleanup.push(outPath);
 		await execa(ffmpegBin, [
@@ -510,7 +533,10 @@ async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now
 			"192k",
 			"-y",
 			outPath
-		], { timeout: 45e3 });
+		], {
+			timeout: 45e3,
+			cancelSignal: signal
+		});
 		await saveDebugFromFile(config, outPath, {
 			fileName: `final_${fileName}`,
 			jobId: options?.debugJobId,
@@ -558,6 +584,8 @@ function withTimeout(promise, ms, label) {
 async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 	const logger = config.logger;
 	const providerId = provider.id;
+	const signal = options?.signal;
+	signal?.throwIfAborted();
 	const segments = parseScript(rawText, options?.pauses ?? config.pauses, logger);
 	logger?.info?.("[tts] Parsed segments", { count: segments.length });
 	const callCap = options?.maxCharsPerRequest;
@@ -569,6 +597,7 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 	const audioParts = [];
 	let done = 0;
 	for (let i = 0; i < chunks.length; i++) {
+		signal?.throwIfAborted();
 		const chunk = chunks[i];
 		const input = `<speak>${chunk.ssml}</speak>`;
 		logger?.debug?.("[tts] Generating chunk", {
@@ -577,8 +606,8 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 			postPause: chunk.postPause
 		});
 		onProgress?.(Math.min(10, Math.round((i + 1) / chunks.length * 10)));
-		const res = await withTimeout(provider.generate(input), 6e4, `provider.generate chunk ${i}`);
-		const duration = res.duration ?? await getAudioDuration(res.audio, config.ffmpeg, logger);
+		const res = await withTimeout(provider.generate(input, { signal }), 6e4, `provider.generate chunk ${i}`);
+		const duration = res.duration ?? await getAudioDuration(res.audio, config.ffmpeg, logger, signal);
 		audioParts.push({
 			buffer: res.audio,
 			duration

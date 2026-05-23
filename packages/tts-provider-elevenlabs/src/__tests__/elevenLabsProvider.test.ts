@@ -126,12 +126,82 @@ describe('ElevenLabsProvider', () => {
         modelId: 'eleven_multilingual_v2',
         outputFormat: 'mp3_44100_128',
       }),
+      expect.anything(),
     );
     const [bufferArg] = getAudioDurationMock.mock.calls[0] ?? [];
     expect(Buffer.isBuffer(bufferArg)).toBe(true);
     expect(bufferArg?.toString()).toBe('hello');
     expect(result.duration).toBe(1.5);
     expect(result.size).toBeGreaterThan(0);
+  });
+
+  describe('AbortSignal (A3)', () => {
+    it('forwards the signal to the ElevenLabs SDK as abortSignal', async () => {
+      const { context } = createContext();
+      convertHandler.mockResolvedValue(Readable.from([Buffer.from('x')])).mockName('convert');
+      const controller = new AbortController();
+
+      const provider = elevenLabsProviderFactory.create(context, {
+        apiKey: 'key',
+        voiceId: 'voice',
+      });
+
+      await provider.generate('<speak>x</speak>', { signal: controller.signal });
+
+      // The SDK's convert(voice_id, request, requestOptions) takes the signal
+      // on the third argument as `abortSignal`.
+      expect(convertHandler).toHaveBeenCalledWith(
+        'voice',
+        expect.anything(),
+        expect.objectContaining({ abortSignal: controller.signal }),
+      );
+    });
+
+    it('throws AbortError immediately when the signal is already aborted', async () => {
+      const { context } = createContext();
+      const controller = new AbortController();
+      controller.abort();
+
+      const provider = elevenLabsProviderFactory.create(context, {
+        apiKey: 'key',
+        voiceId: 'voice',
+      });
+
+      // Assert the error TYPE — a regression that wraps abort into TtsError
+      // (the very bug the post-review fix addressed) would silently pass a
+      // bare `.rejects.toThrow()` check.
+      await expect(
+        provider.generate('<speak>x</speak>', { signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+
+      // No upstream call should have happened.
+      expect(convertHandler).not.toHaveBeenCalled();
+    });
+
+    it('propagates a mid-flight AbortError instead of wrapping it in TtsError', async () => {
+      const { context } = createContext();
+      const abortErr = new Error('aborted');
+      abortErr.name = 'AbortError';
+      // Simulate the SDK throwing an AbortError after the convert call started
+      // (this is what happens when signal.abort() fires while textToSpeech.convert
+      // is in flight). The catch block must NOT wrap this in TtsError.
+      convertHandler.mockRejectedValue(abortErr);
+      const controller = new AbortController();
+      controller.abort();
+
+      const provider = elevenLabsProviderFactory.create(context, {
+        apiKey: 'key',
+        voiceId: 'voice',
+      });
+
+      // The signal was aborted, so even though convertHandler resolved with
+      // an AbortError that arrived inside the try block, the catch should
+      // recognize the aborted signal and propagate the original error.
+      // We expect this NOT to be a TtsError-wrapped failure.
+      await expect(
+        provider.generate('<speak>x</speak>', { signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+    });
   });
 
   describe('per-call overrides (A2)', () => {
@@ -144,7 +214,7 @@ describe('ElevenLabsProvider', () => {
         voiceId: 'default-voice',
       });
 
-      await provider.generate('<speak>x</speak>', { voiceId: 'override-voice' });
+      await provider.generate('<speak>x</speak>', { overrides: { voiceId: 'override-voice' } });
 
       // convertHandler is called with (voiceId, request). The first arg should be the override.
       expect(convertHandler.mock.calls[0]?.[0]).toBe('override-voice');
@@ -165,7 +235,9 @@ describe('ElevenLabsProvider', () => {
       // Override supplies only stability + similarity_boost. The full-replacement
       // semantic means `speed: 0.7` from construction time should be dropped —
       // it's not shallow-merged.
-      await provider.generate('<speak>x</speak>', { voiceSettings: overrideSettings });
+      await provider.generate('<speak>x</speak>', {
+        overrides: { voiceSettings: overrideSettings },
+      });
 
       const callArgs = convertHandler.mock.calls[0]?.[1] as { voiceSettings: object };
       expect(callArgs.voiceSettings).toEqual(overrideSettings);
@@ -185,7 +257,9 @@ describe('ElevenLabsProvider', () => {
       });
 
       // Override only voiceSettings — voiceId and quality should fall back.
-      await provider.generate('<speak>x</speak>', { voiceSettings: { stability: 0.5 } });
+      await provider.generate('<speak>x</speak>', {
+        overrides: { voiceSettings: { stability: 0.5 } },
+      });
 
       // Symmetry check: confirms the three ?? fallback chains aren't
       // interdependent — fallback works in any direction.
@@ -193,6 +267,7 @@ describe('ElevenLabsProvider', () => {
       expect(convertHandler).toHaveBeenCalledWith(
         'base-voice',
         expect.objectContaining({ modelId: 'eleven_multilingual_v2' }),
+        expect.anything(),
       );
     });
 
@@ -206,11 +281,12 @@ describe('ElevenLabsProvider', () => {
         quality: 'standard',
       });
 
-      await provider.generate('<speak>x</speak>', { quality: 'draft' });
+      await provider.generate('<speak>x</speak>', { overrides: { quality: 'draft' } });
 
       expect(convertHandler).toHaveBeenCalledWith(
         'voice',
         expect.objectContaining({ modelId: 'eleven_turbo_v2_5' }),
+        expect.anything(),
       );
     });
 
@@ -227,7 +303,7 @@ describe('ElevenLabsProvider', () => {
       });
 
       // Override only voiceId; voiceSettings and quality should fall back to construction-time.
-      await provider.generate('<speak>x</speak>', { voiceId: 'just-voice-changed' });
+      await provider.generate('<speak>x</speak>', { overrides: { voiceId: 'just-voice-changed' } });
 
       expect(convertHandler.mock.calls[0]?.[0]).toBe('just-voice-changed');
       expect(convertHandler).toHaveBeenCalledWith(
@@ -236,6 +312,7 @@ describe('ElevenLabsProvider', () => {
           voiceSettings: baseSettings,
           modelId: 'eleven_multilingual_v2', // 'high' quality
         }),
+        expect.anything(),
       );
     });
   });
@@ -260,6 +337,7 @@ describe('ElevenLabsProvider', () => {
         voiceSettings,
         modelId: 'eleven_turbo_v2_5',
       }),
+      expect.anything(),
     );
   });
 

@@ -32,6 +32,12 @@ export async function ttsGenerateFull(
 ): Promise<BuildFinalAudioResult> {
   const logger = config.logger;
   const providerId = provider.id;
+  // A3: signal threads through every provider.generate, every ffprobe call,
+  // and every ffmpeg spawn in buildFinalAudio. The check is centralized so
+  // we can bail before kicking off expensive work when the caller has already
+  // cancelled (e.g., BullMQ job killed before we started).
+  const signal = options?.signal;
+  signal?.throwIfAborted();
 
   // Per-call pause table overrides the runtime-config pause table when supplied
   // (A1: multi-tenant pause vocabulary without per-tenant conductors).
@@ -56,6 +62,11 @@ export async function ttsGenerateFull(
   let done = 0;
 
   for (let i = 0; i < chunks.length; i++) {
+    // Re-check between chunks so an abort that lands mid-pipeline bails before
+    // kicking off the next upstream call instead of waiting for the in-flight
+    // chunk's withTimeout to win the race.
+    signal?.throwIfAborted();
+
     const chunk = chunks[i] as Chunk;
     const input = `<speak>${chunk.ssml}</speak>`;
     logger?.debug?.('[tts] Generating chunk', {
@@ -66,10 +77,15 @@ export async function ttsGenerateFull(
 
     onProgress?.(Math.min(10, Math.round(((i + 1) / chunks.length) * 10)));
 
-    const res = await withTimeout(provider.generate(input), 60000, `provider.generate chunk ${i}`);
+    const res = await withTimeout(
+      provider.generate(input, { signal }),
+      60000,
+      `provider.generate chunk ${i}`,
+    );
 
     // Trust provider duration if supplied, otherwise compute it:
-    const duration = res.duration ?? (await getAudioDuration(res.audio, config.ffmpeg, logger));
+    const duration =
+      res.duration ?? (await getAudioDuration(res.audio, config.ffmpeg, logger, signal));
 
     audioParts.push({ buffer: res.audio, duration });
     done++;

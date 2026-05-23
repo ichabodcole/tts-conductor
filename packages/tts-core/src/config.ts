@@ -62,4 +62,16 @@ export interface BuildAudioOptions {
    * omitted or invalid, the provider's `caps.maxCharsPerRequest` is used.
    */
   maxCharsPerRequest?: number;
+  /**
+   * AbortSignal that cancels the in-flight generation job. The signal is
+   * forwarded to:
+   *   - every `provider.generate()` call (which forwards to the upstream SDK)
+   *   - every internal ffmpeg / ffprobe spawn (via execa's `signal` option)
+   *
+   * When aborted, the returned promise rejects with an `AbortError`. Any chunk
+   * already in progress completes its current await before unwinding. Useful
+   * for BullMQ job cancellation, HTTP request aborts, and similar consumer-side
+   * cancellation flows.
+   */
+  signal?: AbortSignal;
 }

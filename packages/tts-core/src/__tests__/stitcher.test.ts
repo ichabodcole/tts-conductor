@@ -73,6 +73,36 @@ describe('buildFinalAudio', () => {
     expect(result.base64Data).toBe(result.audio.toString('base64'));
   });
 
+  it('throws AbortError immediately when given a pre-aborted signal (A3)', async () => {
+    const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+    const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      buildFinalAudio(config, chunks, audio, 'test.mp3', { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    // Critical: no ffmpeg spawn should have happened — we bailed before
+    // resolving the binary or writing any temp files.
+    expect(getExecaMock()).not.toHaveBeenCalled();
+  });
+
+  it('forwards cancelSignal to every execa call (A3)', async () => {
+    const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+    const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+    const controller = new AbortController();
+
+    await buildFinalAudio(config, chunks, audio, 'test.mp3', { signal: controller.signal });
+
+    // Every execa call should carry the signal as its cancelSignal option.
+    const calls = getExecaMock().mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [, , options] of calls) {
+      expect(options).toMatchObject({ cancelSignal: controller.signal });
+    }
+  });
+
   it('reuses cached silence files for identical pause durations', async () => {
     const chunks: Chunk[] = [
       { ssml: 'Hello', postPause: 2 },

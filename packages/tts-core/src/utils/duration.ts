@@ -53,6 +53,7 @@ export async function getAudioDuration(
   audioBuffer: Buffer,
   ffmpegConfig?: FfmpegConfig,
   logger?: TtsLogger,
+  signal?: AbortSignal,
 ): Promise<number> {
   const tempFile = path.join(tmpdir(), `tts_conductor_temp_${Date.now()}.mp3`);
 
@@ -71,7 +72,7 @@ export async function getAudioDuration(
         'default=noprint_wrappers=1:nokey=1',
         tempFile,
       ],
-      { reject: false },
+      { reject: false, cancelSignal: signal },
     );
     const probeOut = ffprobeResult.stdout?.toString().trim() ?? '';
     const parsedProbe = parseFloat(probeOut);
@@ -80,7 +81,10 @@ export async function getAudioDuration(
     }
 
     const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
-    const ffmpegResult = await execa(ffmpegBin, ['-i', tempFile], { reject: false });
+    const ffmpegResult = await execa(ffmpegBin, ['-i', tempFile], {
+      reject: false,
+      cancelSignal: signal,
+    });
     const stderr = ffmpegResult.stderr?.toString() ?? '';
     const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
     if (match) {

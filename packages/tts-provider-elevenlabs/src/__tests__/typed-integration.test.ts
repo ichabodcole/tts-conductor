@@ -84,7 +84,7 @@ describe('ElevenLabs Typed Integration', () => {
     // If this line compiles, CallOverridesFor<'11labs'> is correctly resolving
     // to ElevenLabsCallOverrides through the conductor's typed return value.
     const overridesFn: (chunk: string) => ReturnType<typeof provider.generate> = (chunk) =>
-      provider.generate(chunk, { voiceId: 'override', quality: 'draft' });
+      provider.generate(chunk, { overrides: { voiceId: 'override', quality: 'draft' } });
 
     expect(typeof overridesFn).toBe('function');
   });

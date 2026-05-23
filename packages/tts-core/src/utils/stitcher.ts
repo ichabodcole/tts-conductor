@@ -44,7 +44,12 @@ async function resolveFfmpegBin(ffmpegConfig?: FfmpegConfig): Promise<string> {
   return 'ffmpeg';
 }
 
-async function genSilenceWav(seconds: number, ffmpegConfig?: FfmpegConfig, logger?: TtsLogger) {
+async function genSilenceWav(
+  seconds: number,
+  ffmpegConfig?: FfmpegConfig,
+  logger?: TtsLogger,
+  signal?: AbortSignal,
+) {
   if (silenceCache.has(seconds)) return silenceCache.get(seconds)!;
 
   const out = path.join(tmpdir(), `tts_conductor_silence_${seconds}.wav`);
@@ -69,7 +74,7 @@ async function genSilenceWav(seconds: number, ffmpegConfig?: FfmpegConfig, logge
         '-y',
         out,
       ],
-      { timeout: 30000 },
+      { timeout: 30000, cancelSignal: signal },
     );
   } catch (error) {
     logger?.error?.('Failed to generate silence segment', { seconds, error });
@@ -101,6 +106,7 @@ async function concatParts(
   outPath: string,
   ffmpegConfig?: FfmpegConfig,
   logger?: TtsLogger,
+  signal?: AbortSignal,
 ) {
   const listFile = path.join(tmpdir(), `tts_conductor_concat_${Date.now()}.txt`);
 
@@ -131,10 +137,13 @@ async function concatParts(
           '-y',
           outPath,
         ],
-        { timeout: 45000 },
+        { timeout: 45000, cancelSignal: signal },
       );
       return;
     } catch (error) {
+      // If the abort fired, propagate without trying the filter fallback —
+      // the consumer asked us to stop, not to retry differently.
+      if (signal?.aborted) throw error;
       logger?.warn?.('Concat demuxer failed, attempting filter fallback', error);
       const args: string[] = [];
       for (const file of fileList) {
@@ -156,7 +165,7 @@ async function concatParts(
         '-y',
         outPath,
       );
-      await execa(ffmpegBin, args, { timeout: 60000 });
+      await execa(ffmpegBin, args, { timeout: 60000, cancelSignal: signal });
     }
   } finally {
     try {
@@ -196,13 +205,17 @@ export async function buildFinalAudio(
 
   const logger = config.logger;
   const ffmpegConfig = config.ffmpeg;
+  const signal = options?.signal;
   const tmp = tmpdir();
   const partFiles: string[] = [];
   const tempFilesToCleanup: string[] = [];
 
   try {
+    signal?.throwIfAborted();
     const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
     for (let i = 0; i < audio.length; i++) {
+      signal?.throwIfAborted();
+
       const speechMp3 = path.join(tmp, `tts_chunk_${i}_${Date.now()}.mp3`);
       const speechWav = path.join(tmp, `tts_chunk_${i}_${Date.now()}.wav`);
 
@@ -212,7 +225,7 @@ export async function buildFinalAudio(
       await execa(
         ffmpegBin,
         ['-i', speechMp3, '-ar', '44100', '-ac', '1', '-c:a', 'pcm_s16le', '-y', speechWav],
-        { timeout: 30000 },
+        { timeout: 30000, cancelSignal: signal },
       );
 
       partFiles.push(speechWav);
@@ -221,14 +234,15 @@ export async function buildFinalAudio(
       const chunk = chunks[i];
       const pauseSeconds = chunk?.postPause ?? 0;
       if (pauseSeconds > 0) {
-        const silenceFile = await genSilenceWav(pauseSeconds, ffmpegConfig, logger);
+        const silenceFile = await genSilenceWav(pauseSeconds, ffmpegConfig, logger, signal);
         partFiles.push(silenceFile);
       }
     }
 
+    signal?.throwIfAborted();
     const outWavPath = path.join(tmp, `tts_concat_${Date.now()}.wav`);
     tempFilesToCleanup.push(outWavPath);
-    await concatParts(partFiles, outWavPath, ffmpegConfig, logger);
+    await concatParts(partFiles, outWavPath, ffmpegConfig, logger, signal);
 
     const outPath = path.join(tmp, fileName);
     tempFilesToCleanup.push(outPath);
@@ -236,7 +250,7 @@ export async function buildFinalAudio(
     await execa(
       ffmpegBin,
       ['-i', outWavPath, '-c:a', 'libmp3lame', '-ar', '44100', '-b:a', '192k', '-y', outPath],
-      { timeout: 45000 },
+      { timeout: 45000, cancelSignal: signal },
     );
 
     await saveDebugFromFile(config, outPath, {

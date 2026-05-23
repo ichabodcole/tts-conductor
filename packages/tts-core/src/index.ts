@@ -27,7 +27,12 @@ export type {
   TtsProviderRegistry,
 } from './factory';
 export { ttsGenerateFull, withTimeout } from './operations';
-export type { GenerationResult, ProviderCapabilities, TtsProvider } from './provider';
+export type {
+  GenerateCallOptions,
+  GenerationResult,
+  ProviderCapabilities,
+  TtsProvider,
+} from './provider';
 export { toChunks } from './utils/chunker';
 export { estimateAudioDuration, getAudioDuration } from './utils/duration';
 export type { PauseTable } from './utils/pause';
