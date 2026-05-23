@@ -223,7 +223,7 @@ describe('ElevenLabsProvider', () => {
     it('overrides voiceSettings at call time (full replacement, not shallow merge)', async () => {
       const { context } = createContext();
       convertHandler.mockResolvedValue(Readable.from([Buffer.from('x')])).mockName('convert');
-      const overrideSettings = { stability: 0.9, similarity_boost: 0.4 } as const;
+      const overrideSettings = { stability: 0.9, similarityBoost: 0.4 } as const;
 
       const provider = elevenLabsProviderFactory.create(context, {
         apiKey: 'key',
@@ -232,7 +232,7 @@ describe('ElevenLabsProvider', () => {
         voiceSettings: { stability: 0.1, speed: 0.7 },
       });
 
-      // Override supplies only stability + similarity_boost. The full-replacement
+      // Override supplies only stability + similarityBoost. The full-replacement
       // semantic means `speed: 0.7` from construction time should be dropped —
       // it's not shallow-merged.
       await provider.generate('<speak>x</speak>', {

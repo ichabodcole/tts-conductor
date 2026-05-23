@@ -57,6 +57,24 @@ export async function ttsGenerateFull(
   const segments = parseScript(rawText, effectivePauses, logger);
   logger?.info?.('[tts] Parsed segments', { count: segments.length });
 
+  // V6: clamp pause durations against the configured upper bound before any
+  // downstream code uses them. Protects against adversarial input that would
+  // otherwise request arbitrary silence (e.g., `[PAUSE:99999s]` → ~27h of
+  // silence per chunk). No clamp when maxPauseSeconds is unset.
+  const maxPause = config.maxPauseSeconds;
+  if (maxPause !== undefined && maxPause > 0) {
+    for (const segment of segments) {
+      if (segment.kind === 'pause' && segment.seconds > maxPause) {
+        logger?.warn?.('[tts] Pause duration clamped', {
+          label: segment.label,
+          requested: segment.seconds,
+          clampedTo: maxPause,
+        });
+        segment.seconds = maxPause;
+      }
+    }
+  }
+
   // Per-call maxCharsPerRequest overrides the provider's declared cap when supplied
   // (A5: latency / progress-granularity tuning without forking the provider).
   // Non-positive values are treated as "no override" — passing 0 or a negative

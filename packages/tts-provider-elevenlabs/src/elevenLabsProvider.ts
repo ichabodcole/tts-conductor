@@ -24,10 +24,20 @@ import {
 } from '@tts-conductor/core';
 import { type ElevenLabsRawVoice, ElevenLabsVoiceCatalog } from './voiceCatalog';
 
+/**
+ * Voice settings for ElevenLabs TTS calls. Field names match the
+ * `@elevenlabs/elevenlabs-js` SDK's camelCase TS interface exactly — the SDK
+ * transforms camelCase to the API's wire-level snake_case internally.
+ *
+ * Passing snake_case keys (e.g., `similarity_boost: 0.8`) was silently dropped
+ * by the SDK in earlier versions of this adapter because the SDK reads
+ * `obj.similarityBoost` and finds undefined. Field names are camelCase here
+ * to make that bug structurally impossible.
+ */
 export interface ElevenLabsVoiceSettings {
   stability?: number | null;
-  use_speaker_boost?: boolean | null;
-  similarity_boost?: number | null;
+  useSpeakerBoost?: boolean | null;
+  similarityBoost?: number | null;
   style?: number | null;
   speed?: number | null;
 }
@@ -58,7 +68,7 @@ export interface ElevenLabsCallOverrides {
    *
    * **Replaces** the construction-time `voiceSettings` in full — this is NOT a
    * shallow merge. If you pass `{ stability: 0.9 }`, any other construction-time
-   * settings (`speed`, `style`, `similarity_boost`, etc.) are dropped for this
+   * settings (`speed`, `style`, `similarityBoost`, etc.) are dropped for this
    * call. Pass every field you want active on the call, not just the ones you
    * want to change. Full replacement keeps the override deterministic across
    * future SDK additions.
@@ -315,6 +325,19 @@ function readHeader(headers: unknown, name: string): string | undefined {
 
 type ElevenLabsStream = ReadableStream<Uint8Array> | NodeJS.ReadableStream;
 
+/**
+ * Collect a streaming audio response into a single Buffer. Handles both
+ * paths the SDK exposes — Web's `ReadableStream<Uint8Array>` and Node's
+ * `Readable` — with defensive Buffer coercion at each chunk boundary.
+ *
+ * The `Buffer.from(chunk)` per-chunk wrap (web path) and the
+ * `Buffer.isBuffer(data) ? data : Buffer.from(data)` (node path) guard
+ * against SDK regressions or transports that surface chunks as
+ * non-Buffer-typed ArrayBufferLikes. `Buffer.concat` requires
+ * Uint8Array-compatible inputs; without the coercion, an exotic chunk
+ * type would either throw at concat time or — worse — silently corrupt
+ * the output.
+ */
 async function streamToBuffer(stream: ElevenLabsStream): Promise<Buffer> {
   if ('getReader' in stream && typeof stream.getReader === 'function') {
     const reader = stream.getReader();

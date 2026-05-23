@@ -378,7 +378,8 @@ async function resolveFfmpegBin$1(ffmpegConfig) {
 	return "ffmpeg";
 }
 async function getAudioDuration(audioBuffer, ffmpegConfig, logger, signal) {
-	const tempFile = path.join(tmpdir(), `tts_conductor_temp_${Date.now()}.mp3`);
+	const randomToken = Math.random().toString(36).slice(2, 8);
+	const tempFile = path.join(tmpdir(), `tts_conductor_temp_${Date.now()}_${randomToken}.mp3`);
 	try {
 		await fs.writeFile(tempFile, audioBuffer);
 		const probeOut = (await execa(await resolveFfprobeBin(ffmpegConfig), [
@@ -522,6 +523,18 @@ const INTER_CHANNEL_LAYOUT = INTERMEDIATE_AUDIO.channels === 1 ? "mono" : "stere
 const INTER_SAMPLE_FMT = "s16";
 const silenceCache = /* @__PURE__ */ new Map();
 const MAX_SILENCE_CACHE_SIZE = 50;
+/**
+* Generate a short random token for temp-file names. Combined with
+* `Date.now()` and the chunk index this makes concurrent `buildFinalAudio`
+* calls collision-safe: two jobs hitting chunk 0 within the same millisecond
+* each get distinct token strings, so they don't clobber each other's
+* intermediate files in `os.tmpdir()`. Six base36 characters give ~2 billion
+* combinations per millisecond — effectively impossible to collide in
+* practice.
+*/
+function tempToken() {
+	return Math.random().toString(36).slice(2, 8);
+}
 async function resolveFfmpegBin(ffmpegConfig) {
 	const candidates = [
 		ffmpegConfig?.ffmpegPath,
@@ -539,9 +552,21 @@ async function resolveFfmpegBin(ffmpegConfig) {
 	} catch {}
 	return "ffmpeg";
 }
+/**
+* Round a pause-duration to 0.1s precision for silence-cache key lookups.
+* Without this, 1.7 and 1.71 would generate two separate WAV files even
+* though the perceptual difference is negligible. Rounded to one decimal,
+* the cache hit rate stays high while preserving meaningful pause variation.
+* The underlying file is still generated at the rounded duration — the
+* cache key and the generated content are intentionally aligned.
+*/
+function silenceCacheKey(seconds) {
+	return Math.round(seconds * 10) / 10;
+}
 async function genSilenceWav(seconds, ffmpegConfig, logger, signal, timeoutMs = DEFAULT_TIMEOUTS.silenceGen) {
-	if (silenceCache.has(seconds)) return silenceCache.get(seconds);
-	const out = path.join(tmpdir(), `tts_conductor_silence_${seconds}.wav`);
+	const key = silenceCacheKey(seconds);
+	if (silenceCache.has(key)) return silenceCache.get(key);
+	const out = path.join(tmpdir(), `tts_conductor_silence_${key}.wav`);
 	const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
 	try {
 		await execa(ffmpegBin, [
@@ -550,7 +575,7 @@ async function genSilenceWav(seconds, ffmpegConfig, logger, signal, timeoutMs = 
 			"-i",
 			`anullsrc=r=${INTERMEDIATE_AUDIO.sampleRateHz}:cl=${INTER_CHANNEL_LAYOUT}`,
 			"-t",
-			seconds.toString(),
+			key.toString(),
 			"-ac",
 			INTER_CHANNELS_STR,
 			"-ar",
@@ -581,11 +606,11 @@ async function genSilenceWav(seconds, ffmpegConfig, logger, signal, timeoutMs = 
 			if (oldestFile) fs.unlink(oldestFile).catch(() => void 0);
 		}
 	}
-	silenceCache.set(seconds, out);
+	silenceCache.set(key, out);
 	return out;
 }
 async function concatParts(fileList, outPath, ffmpegConfig, logger, signal, concatTimeoutMs = DEFAULT_TIMEOUTS.concat, filterFallbackTimeoutMs = DEFAULT_TIMEOUTS.concatFilterFallback) {
-	const listFile = path.join(tmpdir(), `tts_conductor_concat_${Date.now()}.txt`);
+	const listFile = path.join(tmpdir(), `tts_conductor_concat_${Date.now()}_${tempToken()}.txt`);
 	try {
 		await fs.writeFile(listFile, fileList.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
 		const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
@@ -637,7 +662,7 @@ async function buildFinalAudio(config, chunks, audio, fileName, options) {
 	const ffmpegConfig = config.ffmpeg;
 	const signal = options?.signal;
 	const outputFormat = options?.output ?? DEFAULT_OUTPUT_FORMAT;
-	const resolvedFileName = fileName ?? `tts_${Date.now()}.${outputFormat.container}`;
+	const resolvedFileName = fileName ?? `tts_${Date.now()}_${tempToken()}.${outputFormat.container}`;
 	const timeouts = {
 		...DEFAULT_TIMEOUTS,
 		...config.timeouts ?? {}
@@ -650,8 +675,9 @@ async function buildFinalAudio(config, chunks, audio, fileName, options) {
 		const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
 		for (let i = 0; i < audio.length; i++) {
 			signal?.throwIfAborted();
-			const speechMp3 = path.join(tmp, `tts_chunk_${i}_${Date.now()}.mp3`);
-			const speechWav = path.join(tmp, `tts_chunk_${i}_${Date.now()}.wav`);
+			const chunkToken = tempToken();
+			const speechMp3 = path.join(tmp, `tts_chunk_${i}_${Date.now()}_${chunkToken}.mp3`);
+			const speechWav = path.join(tmp, `tts_chunk_${i}_${Date.now()}_${chunkToken}.wav`);
 			await fs.writeFile(speechMp3, audio[i]?.buffer ?? Buffer.alloc(0));
 			tempFilesToCleanup.push(speechMp3);
 			await execa(ffmpegBin, [
@@ -678,7 +704,7 @@ async function buildFinalAudio(config, chunks, audio, fileName, options) {
 			}
 		}
 		signal?.throwIfAborted();
-		const outWavPath = path.join(tmp, `tts_concat_${Date.now()}.wav`);
+		const outWavPath = path.join(tmp, `tts_concat_${Date.now()}_${tempToken()}.wav`);
 		tempFilesToCleanup.push(outWavPath);
 		await concatParts(partFiles, outWavPath, ffmpegConfig, logger, signal, timeouts.concat, timeouts.concatFilterFallback);
 		const outPath = path.join(tmp, resolvedFileName);
@@ -755,6 +781,17 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 	const onEvent = options?.onEvent;
 	const segments = parseScript(rawText, options?.pauses ?? config.pauses, logger);
 	logger?.info?.("[tts] Parsed segments", { count: segments.length });
+	const maxPause = config.maxPauseSeconds;
+	if (maxPause !== void 0 && maxPause > 0) {
+		for (const segment of segments) if (segment.kind === "pause" && segment.seconds > maxPause) {
+			logger?.warn?.("[tts] Pause duration clamped", {
+				label: segment.label,
+				requested: segment.seconds,
+				clampedTo: maxPause
+			});
+			segment.seconds = maxPause;
+		}
+	}
 	const callCap = options?.maxCharsPerRequest;
 	const chunks = toChunks(segments, callCap !== void 0 && callCap > 0 ? {
 		...provider.caps,

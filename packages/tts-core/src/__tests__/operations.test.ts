@@ -375,6 +375,50 @@ describe('ttsGenerateFull', () => {
     );
   });
 
+  it('clamps pause durations above maxPauseSeconds (V6)', async () => {
+    // Pause segment with 60s requested; cap at 10s.
+    parseScriptMock.mockReturnValueOnce([
+      { kind: 'text', value: 'Hello' },
+      { kind: 'pause', label: 'LONG', seconds: 60 },
+      { kind: 'text', value: 'World' },
+    ]);
+    const warn = vi.fn();
+    const config: TtsRuntimeConfig = {
+      ...runtimeConfig,
+      logger: { ...runtimeConfig.logger, warn },
+      maxPauseSeconds: 10,
+    };
+
+    await ttsGenerateFull('Hello [PAUSE:LONG] World', provider, config);
+
+    // toChunks should receive segments where the pause's seconds is clamped to 10.
+    const segmentsArg = toChunksMock.mock.calls[0]?.[0] as Array<{
+      kind: string;
+      seconds?: number;
+    }>;
+    const pauseSeg = segmentsArg.find((s) => s.kind === 'pause');
+    expect(pauseSeg?.seconds).toBe(10);
+    // And the consumer is told via warn-level log.
+    expect(warn).toHaveBeenCalledWith(
+      '[tts] Pause duration clamped',
+      expect.objectContaining({ requested: 60, clampedTo: 10 }),
+    );
+  });
+
+  it('does not clamp pauses when maxPauseSeconds is unset (V6 default-off)', async () => {
+    parseScriptMock.mockReturnValueOnce([{ kind: 'pause', label: 'LONG', seconds: 60 }]);
+
+    await ttsGenerateFull('[PAUSE:LONG]', provider, runtimeConfig);
+
+    const segmentsArg = toChunksMock.mock.calls[0]?.[0] as Array<{
+      kind: string;
+      seconds?: number;
+    }>;
+    const pauseSeg = segmentsArg.find((s) => s.kind === 'pause');
+    // Untouched — no clamp configured.
+    expect(pauseSeg?.seconds).toBe(60);
+  });
+
   it('throws AbortError immediately when the signal is already aborted (A3)', async () => {
     const controller = new AbortController();
     controller.abort();

@@ -8,9 +8,25 @@ export interface ProviderCapabilities {
 }
 
 export interface GenerationResult {
+  /** Generated audio for the requested chunk. */
   audio: Buffer;
+  /** MIME type if the provider returns one (e.g., `audio/mpeg`). */
   mimeType?: string;
+  /**
+   * Audio duration in seconds.
+   *
+   * **Providers SHOULD supply this whenever the upstream API returns it.**
+   * When omitted, the orchestrator falls back to running `ffprobe` over the
+   * audio buffer to extract the duration — adds 50-100ms per chunk on the
+   * critical path. For a 20-chunk job that's 1-2 seconds of overhead that
+   * the upstream API already had the answer for.
+   *
+   * If the upstream API returns audio without a duration header (rare, but
+   * possible for some streaming endpoints), leave this undefined and the
+   * ffprobe fallback runs.
+   */
   duration?: number;
+  /** Audio buffer size in bytes if the provider returns it. */
   size?: number;
 }
 

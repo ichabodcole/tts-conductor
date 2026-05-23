@@ -69,6 +69,24 @@ export interface TtsRuntimeConfig {
    * `DEFAULT_TIMEOUTS`. See {@link TtsTimeouts}.
    */
   timeouts?: TtsTimeouts;
+  /**
+   * Optional upper bound on individual pause durations (in seconds). When
+   * set as a positive number, any `[PAUSE:Xs]` marker in the script that
+   * resolves to a duration greater than this is clamped down to
+   * `maxPauseSeconds` before generating the silence segment. Logged at
+   * `warn` level when a clamp fires.
+   *
+   * Defaults to undefined — no clamp, preserving current behavior for
+   * trusted-input use cases. Setting this is recommended whenever the input
+   * scripts come from untrusted sources: without it, an input like
+   * `[PAUSE:99999s]` would happily generate ~27 hours of silence per chunk.
+   *
+   * `0` and negative values are silently treated as "no clamp" (matches the
+   * defensive validation pattern used for `maxCharsPerRequest`). If you want
+   * to suppress all pauses entirely, configure your pause table so the
+   * relevant labels resolve to 0 — don't try to express that via this field.
+   */
+  maxPauseSeconds?: number;
 }
 
 export interface BuildAudioOptions {

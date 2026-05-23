@@ -32,6 +32,19 @@ interface AudioPart {
 const silenceCache = new Map<number, string>();
 const MAX_SILENCE_CACHE_SIZE = 50;
 
+/**
+ * Generate a short random token for temp-file names. Combined with
+ * `Date.now()` and the chunk index this makes concurrent `buildFinalAudio`
+ * calls collision-safe: two jobs hitting chunk 0 within the same millisecond
+ * each get distinct token strings, so they don't clobber each other's
+ * intermediate files in `os.tmpdir()`. Six base36 characters give ~2 billion
+ * combinations per millisecond — effectively impossible to collide in
+ * practice.
+ */
+function tempToken(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
+
 async function resolveFfmpegBin(ffmpegConfig?: FfmpegConfig): Promise<string> {
   const candidates = [
     ffmpegConfig?.ffmpegPath,
@@ -61,6 +74,18 @@ async function resolveFfmpegBin(ffmpegConfig?: FfmpegConfig): Promise<string> {
   return 'ffmpeg';
 }
 
+/**
+ * Round a pause-duration to 0.1s precision for silence-cache key lookups.
+ * Without this, 1.7 and 1.71 would generate two separate WAV files even
+ * though the perceptual difference is negligible. Rounded to one decimal,
+ * the cache hit rate stays high while preserving meaningful pause variation.
+ * The underlying file is still generated at the rounded duration — the
+ * cache key and the generated content are intentionally aligned.
+ */
+function silenceCacheKey(seconds: number): number {
+  return Math.round(seconds * 10) / 10;
+}
+
 async function genSilenceWav(
   seconds: number,
   ffmpegConfig?: FfmpegConfig,
@@ -68,9 +93,10 @@ async function genSilenceWav(
   signal?: AbortSignal,
   timeoutMs: number = DEFAULT_TIMEOUTS.silenceGen,
 ) {
-  if (silenceCache.has(seconds)) return silenceCache.get(seconds)!;
+  const key = silenceCacheKey(seconds);
+  if (silenceCache.has(key)) return silenceCache.get(key)!;
 
-  const out = path.join(tmpdir(), `tts_conductor_silence_${seconds}.wav`);
+  const out = path.join(tmpdir(), `tts_conductor_silence_${key}.wav`);
   const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
 
   try {
@@ -82,7 +108,7 @@ async function genSilenceWav(
         '-i',
         `anullsrc=r=${INTERMEDIATE_AUDIO.sampleRateHz}:cl=${INTER_CHANNEL_LAYOUT}`,
         '-t',
-        seconds.toString(),
+        key.toString(),
         '-ac',
         INTER_CHANNELS_STR,
         '-ar',
@@ -115,7 +141,7 @@ async function genSilenceWav(
     }
   }
 
-  silenceCache.set(seconds, out);
+  silenceCache.set(key, out);
   return out;
 }
 
@@ -128,7 +154,7 @@ async function concatParts(
   concatTimeoutMs: number = DEFAULT_TIMEOUTS.concat,
   filterFallbackTimeoutMs: number = DEFAULT_TIMEOUTS.concatFilterFallback,
 ) {
-  const listFile = path.join(tmpdir(), `tts_conductor_concat_${Date.now()}.txt`);
+  const listFile = path.join(tmpdir(), `tts_conductor_concat_${Date.now()}_${tempToken()}.txt`);
 
   try {
     await fs.writeFile(
@@ -233,7 +259,7 @@ export async function buildFinalAudio(
   // Default filename includes the right container extension so debug sinks
   // and consumer disk-writes get the right suffix. Consumer-supplied
   // fileName is honored verbatim (consumer's responsibility to match).
-  const resolvedFileName = fileName ?? `tts_${Date.now()}.${outputFormat.container}`;
+  const resolvedFileName = fileName ?? `tts_${Date.now()}_${tempToken()}.${outputFormat.container}`;
   // Resolve timeouts once at the orchestration boundary so all helpers
   // receive primitive numbers, not the optional config shape.
   const timeouts = { ...DEFAULT_TIMEOUTS, ...(config.timeouts ?? {}) };
@@ -247,8 +273,13 @@ export async function buildFinalAudio(
     for (let i = 0; i < audio.length; i++) {
       signal?.throwIfAborted();
 
-      const speechMp3 = path.join(tmp, `tts_chunk_${i}_${Date.now()}.mp3`);
-      const speechWav = path.join(tmp, `tts_chunk_${i}_${Date.now()}.wav`);
+      // Random suffix per chunk so two concurrent buildFinalAudio calls
+      // hitting chunk index `i` within the same millisecond don't collide
+      // on the same temp paths. Six base36 chars → effectively zero
+      // collision risk in practice.
+      const chunkToken = tempToken();
+      const speechMp3 = path.join(tmp, `tts_chunk_${i}_${Date.now()}_${chunkToken}.mp3`);
+      const speechWav = path.join(tmp, `tts_chunk_${i}_${Date.now()}_${chunkToken}.wav`);
 
       await fs.writeFile(speechMp3, audio[i]?.buffer ?? Buffer.alloc(0));
       tempFilesToCleanup.push(speechMp3);
@@ -288,7 +319,7 @@ export async function buildFinalAudio(
     }
 
     signal?.throwIfAborted();
-    const outWavPath = path.join(tmp, `tts_concat_${Date.now()}.wav`);
+    const outWavPath = path.join(tmp, `tts_concat_${Date.now()}_${tempToken()}.wav`);
     tempFilesToCleanup.push(outWavPath);
     await concatParts(
       partFiles,

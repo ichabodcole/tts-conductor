@@ -30,7 +30,7 @@ describe('ElevenLabs Typed Integration', () => {
       quality: 'standard',
       voiceSettings: {
         stability: 0.5,
-        similarity_boost: 0.8,
+        similarityBoost: 0.8,
       },
     });
 

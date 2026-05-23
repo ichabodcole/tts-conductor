@@ -56,7 +56,10 @@ export async function getAudioDuration(
   logger?: TtsLogger,
   signal?: AbortSignal,
 ): Promise<number> {
-  const tempFile = path.join(tmpdir(), `tts_conductor_temp_${Date.now()}.mp3`);
+  // Random suffix avoids concurrent-call collisions in os.tmpdir(); see
+  // tempToken() in stitcher.ts for the rationale.
+  const randomToken = Math.random().toString(36).slice(2, 8);
+  const tempFile = path.join(tmpdir(), `tts_conductor_temp_${Date.now()}_${randomToken}.mp3`);
 
   try {
     await fs.writeFile(tempFile, audioBuffer);

@@ -88,9 +88,13 @@ Thread an optional `AbortSignal` through `generate()` and `ttsGenerateFull` into
 
 These are claims worth verifying against current code; some may already be true.
 
-### V1. Voice settings normalization in ElevenLabs adapter (#5/3)
+### V1. Voice settings normalization in ElevenLabs adapter (#5/3) — RESOLVED 2026-05-23
 
-ElevenLabs SDK expects snake_case (`stability`, `similarity_boost`, `style`, `use_speaker_boost`). Consumer code writes camelCase. Adapter should translate; worth confirming against current provider option schema. Possibly already correct.
+**Original framing (preserved for historical context):** "ElevenLabs SDK expects snake_case (`stability`, `similarity_boost`, `style`, `use_speaker_boost`). Consumer code writes camelCase. Adapter should translate; worth confirming against current provider option schema."
+
+**Investigation outcome:** the original diagnosis had the SDK's expectation backwards. The HTTP wire format uses snake_case, but the SDK's TypeScript interface uses camelCase (`similarityBoost`, `useSpeakerBoost`) and handles the wire-level translation internally. Our `ElevenLabsVoiceSettings` interface was the snake_case version — passing snake_case keys to the SDK was silently dropped because the SDK reads `obj.similarityBoost` (undefined) and the `voiceSettings as ElevenLabsTypes.VoiceSettings` cast hid the mismatch.
+
+**Resolution:** renamed `ElevenLabsVoiceSettings` fields to camelCase (`similarityBoost`, `useSpeakerBoost`) to match the SDK exactly. Breaking change to the public interface but pre-publish so free. The cast at the SDK call site is now structurally honest. Updated test fixtures and the package README.
 
 ### V2. Stream-to-buffer normalization in adapter (#5/4)
 

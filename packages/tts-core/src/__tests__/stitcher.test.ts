@@ -298,6 +298,32 @@ describe('buildFinalAudio', () => {
     expect(silenceCalls).toHaveLength(1);
   });
 
+  it('shares silence cache entries for pause durations that round to the same 0.1s value (V5)', async () => {
+    // 1.71 and 1.74 both round to 1.7 — should share a single silence file
+    // rather than generating two near-identical WAVs. The cache key rounds
+    // to 0.1s precision; the generated file uses the rounded value.
+    const chunks: Chunk[] = [
+      { ssml: 'A', postPause: 1.71 },
+      { ssml: 'B', postPause: 1.74 },
+    ];
+    const audio = [
+      { buffer: Buffer.from('a'), duration: 1 },
+      { buffer: Buffer.from('b'), duration: 1 },
+    ];
+
+    await buildFinalAudio(config, chunks, audio, 'cache-rounded.mp3');
+
+    const silenceCalls = getExecaMock().mock.calls.filter((call: unknown[]) => {
+      const args = call[1];
+      return (
+        Array.isArray(args) &&
+        args.some((arg) => typeof arg === 'string' && arg.includes('anullsrc'))
+      );
+    });
+    // One ffmpeg call for the rounded 1.7s silence, shared by both chunks.
+    expect(silenceCalls).toHaveLength(1);
+  });
+
   it('falls back to filter concat when concat demuxer fails', async () => {
     const execaMock = getExecaMock();
     execaMock.mockImplementation(async (_cmd: string | URL, args?: readonly string[]) => {
