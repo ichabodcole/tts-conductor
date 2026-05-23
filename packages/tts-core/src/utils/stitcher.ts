@@ -260,6 +260,22 @@ export async function buildFinalAudio(
   // and consumer disk-writes get the right suffix. Consumer-supplied
   // fileName is honored verbatim (consumer's responsibility to match).
   const resolvedFileName = fileName ?? `tts_${Date.now()}_${tempToken()}.${outputFormat.container}`;
+  // D2: warn when a consumer-supplied filename's extension doesn't match the
+  // output codec's container. We still honor the consumer's exact filename
+  // (renaming would be more surprising than the mismatch), but a warning
+  // surfaces the foot-gun before it ships as "my .mp3 file won't play."
+  if (fileName) {
+    const dotIdx = fileName.lastIndexOf('.');
+    const ext = dotIdx >= 0 ? fileName.slice(dotIdx + 1).toLowerCase() : '';
+    if (ext && ext !== outputFormat.container.toLowerCase()) {
+      logger?.warn?.('[tts] Output filename extension does not match codec container', {
+        fileName,
+        fileExtension: ext,
+        container: outputFormat.container,
+        codec: outputFormat.codec,
+      });
+    }
+  }
   // Resolve timeouts once at the orchestration boundary so all helpers
   // receive primitive numbers, not the optional config shape.
   const timeouts = { ...DEFAULT_TIMEOUTS, ...(config.timeouts ?? {}) };

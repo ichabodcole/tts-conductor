@@ -138,6 +138,25 @@ declare const OUTPUT_FORMATS: {
     readonly container: "opus";
     readonly mimeType: "audio/ogg; codecs=opus";
   };
+  /**
+   * AAC preset using ffmpeg's native `aac` encoder (always available in
+   * standard ffmpeg builds). Container is `m4a` (MP4 audio), MIME is
+   * `audio/mp4`. Targets iOS/Safari and Apple Podcasts delivery, where AAC
+   * is the native lane.
+   *
+   * Note: `libfdk_aac` is higher-quality than ffmpeg's native `aac` encoder
+   * but is GPL-incompatible and rarely shipped in distributions. Consumers
+   * who have it and want it can compose a custom `OutputFormat` with
+   * `codec: 'libfdk_aac'`.
+   */
+  readonly AAC_128: {
+    readonly codec: "aac";
+    readonly bitrate: "128k";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "m4a";
+    readonly mimeType: "audio/mp4";
+  };
   readonly FLAC: {
     readonly codec: "flac";
     readonly sampleRateHz: 44100;

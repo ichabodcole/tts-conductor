@@ -274,6 +274,64 @@ describe('buildFinalAudio', () => {
       // Consumer's name wins — extension is .mp3 even though the codec is Opus.
       expect(outputPath).toMatch(/custom-name\.mp3$/);
     });
+
+    it('uses the AAC_128 preset (native `aac` encoder, m4a container) — D1', async () => {
+      const { OUTPUT_FORMATS } = await import('../defaults');
+      const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+      const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+      const result = await buildFinalAudio(config, chunks, audio, undefined, {
+        output: OUTPUT_FORMATS.AAC_128,
+      });
+
+      expect(result.mimeType).toBe('audio/mp4');
+      const calls = getExecaMock().mock.calls;
+      const finalArgs = (calls[calls.length - 1]?.[1] as string[]) ?? [];
+      expect(finalArgs).toContain('aac');
+      expect(finalArgs).toContain('128k');
+      expect(finalArgs).toContain('44100');
+      const outputPath = finalArgs[finalArgs.length - 1] ?? '';
+      expect(outputPath).toMatch(/\.m4a$/);
+    });
+
+    it('warns when consumer-supplied filename extension does not match codec container — D2', async () => {
+      const { OUTPUT_FORMATS } = await import('../defaults');
+      const warn = vi.fn();
+      const cfg = { ...config, logger: { ...config.logger, warn } };
+      const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+      const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+      // .mp3 filename + Opus codec → mismatch.
+      await buildFinalAudio(cfg, chunks, audio, 'custom-name.mp3', {
+        output: OUTPUT_FORMATS.OPUS_64,
+      });
+
+      expect(warn).toHaveBeenCalledWith(
+        '[tts] Output filename extension does not match codec container',
+        expect.objectContaining({
+          fileName: 'custom-name.mp3',
+          fileExtension: 'mp3',
+          container: 'opus',
+        }),
+      );
+    });
+
+    it('does NOT warn when filename extension matches the codec container — D2', async () => {
+      const { OUTPUT_FORMATS } = await import('../defaults');
+      const warn = vi.fn();
+      const cfg = { ...config, logger: { ...config.logger, warn } };
+      const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+      const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+      await buildFinalAudio(cfg, chunks, audio, 'match.opus', {
+        output: OUTPUT_FORMATS.OPUS_64,
+      });
+
+      const mismatchCalls = warn.mock.calls.filter((c) =>
+        String(c[0]).includes('does not match codec container'),
+      );
+      expect(mismatchCalls).toHaveLength(0);
+    });
   });
 
   it('reuses cached silence files for identical pause durations', async () => {

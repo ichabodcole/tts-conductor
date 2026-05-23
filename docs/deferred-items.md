@@ -14,25 +14,17 @@ Three buckets:
 
 ## Bucket 1 — Decide before publish
 
-### D1. AAC preset for iOS/Safari delivery
+### D1. AAC preset for iOS/Safari delivery — RESOLVED 2026-05-23
 
 **Source:** A7 (output format) review.
 
-**Context:** The output-format presets cover MP3 (4 bitrates), Opus (mono + stereo), FLAC, WAV. The reviewer flagged that AAC (`aac` codec or `libfdk_aac`, `m4a` container, `audio/mp4` MIME) is a real gap for iOS/Safari delivery and Apple Podcasts pipelines. ffmpeg's native `aac` encoder is decent; `libfdk_aac` is higher quality but not always built into ffmpeg distributions.
+**Disposition:** Added `OUTPUT_FORMATS.AAC_128` (native `aac` encoder, `m4a` container, `audio/mp4` MIME). Targets iOS/Safari and Apple Podcasts delivery — the one missing format with a clear Apple-ecosystem answer. ~20 lines + coherence test. `libfdk_aac` left to consumers as a custom-`OutputFormat` escape hatch (GPL-incompatible, rarely shipped in stock ffmpeg).
 
-**Recommendation:** Add as `AAC_128` preset using the native `aac` encoder before publish if there's a known consumer who needs it; otherwise defer to 1.x minor (`AAC_128` is ~20 lines including a coherence test). The risk of leaving it out: consumers who need AAC have to write their own `OutputFormat` object, which is documented and works fine.
-
-**Decision needed:** Add `AAC_128` to the presets now, or wait for a real consumer ask?
-
-### D2. Filename-mismatch warning
+### D2. Filename-mismatch warning — RESOLVED 2026-05-23
 
 **Source:** A7 review.
 
-**Context:** When a consumer supplies a `fileName` to `buildFinalAudio` that doesn't match `outputFormat.container`, the library produces a file with the consumer's extension (e.g., `.mp3` filename + Opus codec → an `.mp3` file containing Opus). Documented as a foot-gun in the JSDoc; the reviewer suggested a 3-line `logger.warn(...)` when the extensions don't match.
-
-**Recommendation:** Add the warning. Small, defensive, prevents a documented FAQ from materializing. Could fit naturally into the next docs polish branch (Task #14).
-
-**Decision needed:** Add the warning, or rely on documentation only?
+**Disposition:** Added a `logger.warn(...)` in `buildFinalAudio` when the consumer-supplied `fileName`'s extension doesn't match `outputFormat.container`. Filename still honored verbatim — renaming the file would be more surprising than the mismatch. Two tests cover the warn-fires and warn-doesn't-fire cases.
 
 ### D3. ElevenLabs `1200` `maxCharsPerRequest` default vs real `~5000` server limit
 
@@ -40,19 +32,13 @@ Three buckets:
 
 **Context:** ElevenLabs' actual character limit per request is around 5000 (not officially documented but well-observed). The library defaults to `1200` because Story Loom found that smaller chunks gave better latency/progress granularity. Consumers can already override via `BuildAudioOptions.maxCharsPerRequest`, so this is just a default choice.
 
-**Recommendation:** Keep the conservative default. The reasoning is documented inline in `ELEVENLABS_DEFAULTS`. Consumers who want throughput over latency can bump it. Worth mentioning in the README's "tuning" section before publish.
+**Disposition:** Keep the conservative default — confirmed 2026-05-23. The reasoning is documented inline in `ELEVENLABS_DEFAULTS`. Folded into Task #14 (docs polish) as a README "tuning" section item.
 
-**Decision needed:** Acknowledge as docs-polish item (D4 here points at this), or change the default?
-
-### D4. Per-package LICENSE files for npm publication
+### D4. Per-package LICENSE files for npm publication — RESOLVED 2026-05-23
 
 **Source:** B1+B2 (license adoption) note.
 
-**Context:** The repo has a top-level `LICENSE` file (MIT), and each package's `package.json` declares `"license": "MIT"`. npm packages typically also include a per-package `LICENSE` file in their published tarball so the license travels with the install. Currently the `files` array in each package only includes `dist`.
-
-**Recommendation:** Either (a) copy the root `LICENSE` to each package directory and add `LICENSE` to each `files` array, or (b) set up a build step / `release-please` config to do it at publish time. (a) is simpler and works for any package manager.
-
-**Decision needed:** Copy LICENSE per package, or add to release-please workflow?
+**Disposition:** Copied the root `LICENSE` (MIT) to each package directory and added `LICENSE` + `README.md` to each `package.json`'s `files` array. Option (a) from the original recommendation — simpler than wiring release-please, works for any package manager, license travels with the install tarball.
 
 ---
 
@@ -94,13 +80,11 @@ Three buckets:
 
 **Recommendation:** No code change. These are surface-level documentation items — keep them flagged here so if a consumer reports surprising `gender: undefined` results we know where to point them, and if we ever add other provider adapters we can audit whether the same patterns apply.
 
-### D8a. `parse-complete` has no `onProgress` counterpart
+### D8a. `parse-complete` has no `onProgress` counterpart — RESOLVED 2026-05-23
 
 **Source:** A8 (richer events) review.
 
-**Context:** The new lifecycle events fire at 5 points (parse-complete, chunk-start, chunk-complete, stitch-start, stitch-complete). At each point that has an `onProgress` percentage emission, the events fire in the same order. **But** `parse-complete` has no `onProgress` counterpart — when it fires, the percentage is still at 0%. Dual-subscriber consumers (using both `onProgress` and `onEvent`) will see the event without a matching progress tick.
-
-**Recommendation:** Either emit `onProgress?.(0)` immediately before `parse-complete` (cheap, makes the contract symmetric) or document the asymmetry inline. The current state is functionally correct but quietly inconsistent. Lean toward the explicit `onProgress?.(0)` call — it's one line and removes the surprise.
+**Disposition:** Emit `onProgress?.(0)` immediately before `parse-complete`. Promoted out of Bucket 2 — since the events API is shipping with v1.0, freezing it symmetric now is cheaper than fixing the asymmetry as a behavior change later. One line + one test.
 
 ### D8b. `fetchPreview` helper on provider / adapter
 

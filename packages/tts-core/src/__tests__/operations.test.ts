@@ -322,6 +322,25 @@ describe('ttsGenerateFull', () => {
       // Just verifies no throw when consumer doesn't subscribe.
       await expect(ttsGenerateFull('Hello world', provider, runtimeConfig)).resolves.toBeDefined();
     });
+
+    it('emits onProgress(0) immediately before parse-complete (D8a)', async () => {
+      // Dual-subscriber consumers (onProgress + onEvent) get a matching
+      // progress tick at every event boundary — without this, parse-complete
+      // was the only event with no corresponding onProgress emission.
+      const events: { kind: string }[] = [];
+      const onProgress = vi.fn();
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, onProgress, {
+        onEvent: (e) => {
+          events.push(e as { kind: string });
+        },
+      });
+
+      // First onProgress call is 0 (immediately before parse-complete fires).
+      expect(onProgress.mock.calls[0]).toEqual([0]);
+      // The first event in the stream is parse-complete.
+      expect(events[0]?.kind).toBe('parse-complete');
+    });
   });
 
   it('uses per-call pause table override when supplied (A1)', async () => {

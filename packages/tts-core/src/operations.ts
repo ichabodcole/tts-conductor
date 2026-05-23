@@ -88,6 +88,11 @@ export async function ttsGenerateFull(
   const chunks = toChunks(segments, effectiveCaps, logger);
   logger?.info?.('[tts] Generated chunks', { count: chunks.length });
 
+  // D8a: emit a 0% tick before parse-complete so dual-subscriber consumers
+  // (onProgress + onEvent) see a matching progress signal at every event
+  // boundary — keeps the two channels symmetric. Without this, parse-complete
+  // is the only event with no corresponding onProgress emission.
+  onProgress?.(0);
   onEvent?.({ kind: 'parse-complete', segments: segments.length, chunks: chunks.length });
 
   const audioParts: { buffer: Buffer; duration: number }[] = [];
