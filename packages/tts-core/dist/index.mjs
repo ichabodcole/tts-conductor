@@ -752,6 +752,7 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 		...DEFAULT_TIMEOUTS,
 		...config.timeouts ?? {}
 	};
+	const onEvent = options?.onEvent;
 	const segments = parseScript(rawText, options?.pauses ?? config.pauses, logger);
 	logger?.info?.("[tts] Parsed segments", { count: segments.length });
 	const callCap = options?.maxCharsPerRequest;
@@ -760,6 +761,11 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 		maxCharsPerRequest: callCap
 	} : provider.caps, logger);
 	logger?.info?.("[tts] Generated chunks", { count: chunks.length });
+	onEvent?.({
+		kind: "parse-complete",
+		segments: segments.length,
+		chunks: chunks.length
+	});
 	const audioParts = [];
 	let done = 0;
 	for (let i = 0; i < chunks.length; i++) {
@@ -770,6 +776,11 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 			provider: providerId,
 			index: i,
 			postPause: chunk.postPause
+		});
+		onEvent?.({
+			kind: "chunk-start",
+			index: i,
+			total: chunks.length
 		});
 		onProgress?.(Math.min(10, Math.round((i + 1) / chunks.length * 10)));
 		const res = await withTimeout(provider.generate(input, { signal }), timeouts.generate, `provider.generate chunk ${i}`);
@@ -786,10 +797,26 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 		});
 		const chunkProgress = Math.round(done / chunks.length * 80);
 		onProgress?.(chunkProgress);
+		onEvent?.({
+			kind: "chunk-complete",
+			index: i,
+			total: chunks.length,
+			duration,
+			size: res.audio.length
+		});
 	}
 	onProgress?.(80);
+	onEvent?.({
+		kind: "stitch-start",
+		chunks: chunks.length
+	});
 	const final = await withTimeout(buildFinalAudio(config, chunks, audioParts, void 0, options), timeouts.stitch, "stitcher.buildFinalAudio");
 	onProgress?.(100);
+	onEvent?.({
+		kind: "stitch-complete",
+		duration: final.duration,
+		size: final.size
+	});
 	return final;
 }
 //#endregion

@@ -1,4 +1,5 @@
 import type { OutputFormat } from './defaults';
+import type { TtsEventListener } from './events';
 
 export enum ProcessStage {
   /** Individual audio chunks from providers */
@@ -118,4 +119,20 @@ export interface BuildAudioOptions {
    *   { output: { ...OUTPUT_FORMATS.MP3_192, bitrate: '320k' } }
    */
   output?: OutputFormat;
+  /**
+   * Subscriber for richer lifecycle events (parse-complete, chunk-start,
+   * chunk-complete, stitch-start, stitch-complete). See {@link TtsEvent} for
+   * the discriminated-union shape.
+   *
+   * Coexists with `onProgress` (the percentage-based callback that's still
+   * available as a positional arg) — both fire independently. Use `onEvent`
+   * when you need per-chunk visibility for SSE streams, BullMQ progress
+   * payloads, latency observability, etc. Use `onProgress` if a simple
+   * 0-100% summary is enough.
+   *
+   * The listener is invoked synchronously from the orchestration loop. If
+   * the subscriber does expensive work (HTTP push, DB write), wrap it in a
+   * fire-and-forget pattern so it doesn't add latency to the pipeline.
+   */
+  onEvent?: TtsEventListener;
 }

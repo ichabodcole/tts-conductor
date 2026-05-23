@@ -25,6 +25,15 @@ export {
   TtsTransientError,
 } from './errors';
 export type {
+  TtsChunkCompleteEvent,
+  TtsChunkStartEvent,
+  TtsEvent,
+  TtsEventListener,
+  TtsParseCompleteEvent,
+  TtsStitchCompleteEvent,
+  TtsStitchStartEvent,
+} from './events';
+export type {
   CallOverridesFor,
   ProviderOptionsFor,
   RegisteredProviderIds,

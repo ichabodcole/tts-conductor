@@ -82,6 +82,14 @@ Three buckets:
 
 **Recommendation:** Refactor when the test file is next touched (likely during A6 voice catalog work, which lives in the same provider package). Low priority; current behavior is correct.
 
+### D8a. `parse-complete` has no `onProgress` counterpart
+
+**Source:** A8 (richer events) review.
+
+**Context:** The new lifecycle events fire at 5 points (parse-complete, chunk-start, chunk-complete, stitch-start, stitch-complete). At each point that has an `onProgress` percentage emission, the events fire in the same order. **But** `parse-complete` has no `onProgress` counterpart — when it fires, the percentage is still at 0%. Dual-subscriber consumers (using both `onProgress` and `onEvent`) will see the event without a matching progress tick.
+
+**Recommendation:** Either emit `onProgress?.(0)` immediately before `parse-complete` (cheap, makes the contract symmetric) or document the asymmetry inline. The current state is functionally correct but quietly inconsistent. Lean toward the explicit `onProgress?.(0)` call — it's one line and removes the surprise.
+
 ### D8. Pre-existing temp-file collision (`stitcher.ts` `tts_chunk_${i}_${Date.now()}.mp3`)
 
 **Source:** Issue #4 / backlog V4 / config-sweep review.

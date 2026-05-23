@@ -46,6 +46,11 @@ export async function ttsGenerateFull(
   // apart as more keys are added (config-sweep convention).
   const timeouts = { ...DEFAULT_TIMEOUTS, ...(config.timeouts ?? {}) };
 
+  // A8: richer lifecycle events coexist with the legacy onProgress percentage.
+  // Both fire independently — onProgress for the simple 0-100% case, onEvent
+  // for SSE / observability consumers who need per-chunk structured data.
+  const onEvent = options?.onEvent;
+
   // Per-call pause table overrides the runtime-config pause table when supplied
   // (A1: multi-tenant pause vocabulary without per-tenant conductors).
   const effectivePauses = options?.pauses ?? config.pauses;
@@ -65,6 +70,8 @@ export async function ttsGenerateFull(
   const chunks = toChunks(segments, effectiveCaps, logger);
   logger?.info?.('[tts] Generated chunks', { count: chunks.length });
 
+  onEvent?.({ kind: 'parse-complete', segments: segments.length, chunks: chunks.length });
+
   const audioParts: { buffer: Buffer; duration: number }[] = [];
   let done = 0;
 
@@ -82,6 +89,10 @@ export async function ttsGenerateFull(
       postPause: chunk.postPause,
     });
 
+    // Fire chunk-start before onProgress so dual-subscriber consumers see
+    // the structured event before the percentage advances. Matches the
+    // post-chunk side which does onProgress → chunk-complete in order.
+    onEvent?.({ kind: 'chunk-start', index: i, total: chunks.length });
     onProgress?.(Math.min(10, Math.round(((i + 1) / chunks.length) * 10)));
 
     const res = await withTimeout(
@@ -105,15 +116,24 @@ export async function ttsGenerateFull(
 
     const chunkProgress = Math.round((done / chunks.length) * 80);
     onProgress?.(chunkProgress);
+    onEvent?.({
+      kind: 'chunk-complete',
+      index: i,
+      total: chunks.length,
+      duration,
+      size: res.audio.length,
+    });
   }
 
   onProgress?.(80);
+  onEvent?.({ kind: 'stitch-start', chunks: chunks.length });
   const final = await withTimeout(
     buildFinalAudio(config, chunks, audioParts, undefined, options),
     timeouts.stitch,
     'stitcher.buildFinalAudio',
   );
   onProgress?.(100);
+  onEvent?.({ kind: 'stitch-complete', duration: final.duration, size: final.size });
 
   return final;
 }

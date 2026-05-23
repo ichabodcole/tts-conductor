@@ -161,6 +161,88 @@ declare const OUTPUT_FORMATS: {
  */
 declare const DEFAULT_OUTPUT_FORMAT: OutputFormat;
 //#endregion
+//#region src/events.d.ts
+/**
+ * Lifecycle events emitted by `ttsGenerateFull` during a generation job.
+ *
+ * Consumers subscribe via {@link BuildAudioOptions.onEvent} and receive a
+ * sequence of events as the orchestration progresses. The classic
+ * percentage-based `onProgress` callback is still supported alongside this —
+ * `onEvent` is the richer surface for consumers who need per-chunk visibility
+ * (SSE streams, BullMQ workers reporting structured progress, observability
+ * pipelines, latency-per-chunk analysis, etc.).
+ *
+ * Event ordering for a successful job with N chunks:
+ *
+ *   parse-complete  (once, after parsing + chunking)
+ *   chunk-start     (N times, one per chunk before its upstream call)
+ *   chunk-complete  (N times, after each chunk's audio is ready)
+ *   stitch-start    (once, before ffmpeg concat begins)
+ *   stitch-complete (once, after the final audio is encoded)
+ *
+ * If the job aborts or fails, the promise rejects — there is no `error`
+ * event. Consumers handle failures via `try/catch` or `.catch()`; subscribing
+ * to `onEvent` is purely for progress/observability.
+ */
+type TtsEvent = TtsParseCompleteEvent | TtsChunkStartEvent | TtsChunkCompleteEvent | TtsStitchStartEvent | TtsStitchCompleteEvent;
+/**
+ * Fires once after the script has been parsed into segments and chunked
+ * into provider-sized requests. Lets consumers initialize per-job state
+ * (progress bars, expected-duration estimates, etc.) once the total work
+ * is known.
+ */
+interface TtsParseCompleteEvent {
+  kind: 'parse-complete';
+  /** Number of segments parseScript produced (text + pause segments combined). */
+  segments: number;
+  /** Number of chunks toChunks produced — equals the number of upstream calls. */
+  chunks: number;
+}
+/** Fires immediately before each `provider.generate(...)` call. */
+interface TtsChunkStartEvent {
+  kind: 'chunk-start';
+  /** Zero-based chunk index. */
+  index: number;
+  /** Total chunk count for this job. */
+  total: number;
+}
+/** Fires after each `provider.generate(...)` call returns and the chunk's duration is known. */
+interface TtsChunkCompleteEvent {
+  kind: 'chunk-complete';
+  index: number;
+  total: number;
+  /** Chunk audio duration in seconds (provider-supplied or ffprobe-computed). */
+  duration: number;
+  /** Chunk audio buffer length in bytes — matches `GenerationResult.size` convention. */
+  size: number;
+}
+/** Fires before `buildFinalAudio` starts assembling the chunks. */
+interface TtsStitchStartEvent {
+  kind: 'stitch-start';
+  /** Number of chunks about to be concatenated. */
+  chunks: number;
+}
+/** Fires after the final audio is encoded and ready to return. */
+interface TtsStitchCompleteEvent {
+  kind: 'stitch-complete';
+  /** Final audio duration in seconds (sum of chunk durations + pauses). */
+  duration: number;
+  /** Final audio buffer length in bytes — matches `BuildFinalAudioResult.size` convention. */
+  size: number;
+}
+/**
+ * Subscriber callback. Always invoked synchronously from the orchestration
+ * loop — if the subscriber does expensive work (e.g., HTTP push), wrap it in
+ * a fire-and-forget pattern so it doesn't add latency to the pipeline.
+ *
+ * The return type accepts `void | Promise<void>` so the type system doesn't
+ * silently allow `async (e) => { await db.record(e); }` listeners to look
+ * correct while their returned Promise is dropped on the floor. We do NOT
+ * await the returned Promise — declare it explicitly so callers know the
+ * library treats the listener as fire-and-forget either way.
+ */
+type TtsEventListener = (event: TtsEvent) => void | Promise<void>;
+//#endregion
 //#region src/config.d.ts
 declare enum ProcessStage {
   /** Individual audio chunks from providers */
@@ -273,6 +355,22 @@ interface BuildAudioOptions {
    *   { output: { ...OUTPUT_FORMATS.MP3_192, bitrate: '320k' } }
    */
   output?: OutputFormat;
+  /**
+   * Subscriber for richer lifecycle events (parse-complete, chunk-start,
+   * chunk-complete, stitch-start, stitch-complete). See {@link TtsEvent} for
+   * the discriminated-union shape.
+   *
+   * Coexists with `onProgress` (the percentage-based callback that's still
+   * available as a positional arg) — both fire independently. Use `onEvent`
+   * when you need per-chunk visibility for SSE streams, BullMQ progress
+   * payloads, latency observability, etc. Use `onProgress` if a simple
+   * 0-100% summary is enough.
+   *
+   * The listener is invoked synchronously from the orchestration loop. If
+   * the subscriber does expensive work (HTTP push, DB write), wrap it in a
+   * fire-and-forget pattern so it doesn't add latency to the pipeline.
+   */
+  onEvent?: TtsEventListener;
 }
 //#endregion
 //#region src/provider.d.ts
@@ -551,5 +649,5 @@ declare function ttsGenerateFull(rawText: string, provider: TtsProvider, config:
 declare function getAudioDuration(audioBuffer: Buffer, ffmpegConfig?: FfmpegConfig, logger?: TtsLogger, signal?: AbortSignal): Promise<number>;
 declare function estimateAudioDuration(audioBuffer: Buffer, bitrate?: number): number;
 //#endregion
-export { type BuildAudioOptions, type BuildFinalAudioResult, type CallOverridesFor, DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerateCallOptions, type GenerationResult, OUTPUT_FORMATS, type OutputFormat, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, type TtsLogger, type TtsProvider, type TtsProviderCallOverridesRegistry, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, TtsQuotaExceededError, TtsRateLimitError, type TtsRuntimeConfig, type TtsTimeouts, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
+export { type BuildAudioOptions, type BuildFinalAudioResult, type CallOverridesFor, DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerateCallOptions, type GenerationResult, OUTPUT_FORMATS, type OutputFormat, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsAuthenticationError, type TtsChunkCompleteEvent, type TtsChunkStartEvent, TtsConductor, TtsError, type TtsEvent, type TtsEventListener, TtsInvalidInputError, type TtsLogger, type TtsParseCompleteEvent, type TtsProvider, type TtsProviderCallOverridesRegistry, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, TtsQuotaExceededError, TtsRateLimitError, type TtsRuntimeConfig, type TtsStitchCompleteEvent, type TtsStitchStartEvent, type TtsTimeouts, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
 //# sourceMappingURL=index.d.mts.map

@@ -204,6 +204,126 @@ describe('ttsGenerateFull', () => {
     );
   });
 
+  describe('lifecycle events (A8)', () => {
+    it('fires parse-complete, chunk-start, chunk-complete, stitch-start, stitch-complete in order', async () => {
+      const events: unknown[] = [];
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      // Default mocks produce 1 segment + 1 chunk, so we expect exactly five events.
+      expect(events.map((e: any) => e.kind)).toEqual([
+        'parse-complete',
+        'chunk-start',
+        'chunk-complete',
+        'stitch-start',
+        'stitch-complete',
+      ]);
+    });
+
+    it('parse-complete carries segments and chunks counts', async () => {
+      const events: any[] = [];
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      const parseComplete = events.find((e) => e.kind === 'parse-complete');
+      expect(parseComplete).toEqual({ kind: 'parse-complete', segments: 1, chunks: 1 });
+    });
+
+    it('chunk-start and chunk-complete carry index, total, and chunk-complete includes duration + bytes', async () => {
+      const events: any[] = [];
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      const chunkStart = events.find((e) => e.kind === 'chunk-start');
+      expect(chunkStart).toEqual({ kind: 'chunk-start', index: 0, total: 1 });
+
+      const chunkComplete = events.find((e) => e.kind === 'chunk-complete');
+      expect(chunkComplete).toMatchObject({
+        kind: 'chunk-complete',
+        index: 0,
+        total: 1,
+        duration: 1.25, // provider supplied this in the mock
+        size: expect.any(Number),
+      });
+      expect(chunkComplete.size).toBeGreaterThan(0);
+    });
+
+    it('stitch-complete carries final duration and size from buildFinalAudio result', async () => {
+      const events: any[] = [];
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      // buildFinalAudioMock returns duration: 1.25, size: 4 (from beforeEach).
+      expect(events.find((e) => e.kind === 'stitch-complete')).toEqual({
+        kind: 'stitch-complete',
+        duration: 1.25,
+        size: 4,
+      });
+    });
+
+    it('fires chunk-start/complete with sequential indices for a multi-chunk job', async () => {
+      // Override the toChunks mock with 3 chunks so we can verify the
+      // index progression across the loop.
+      toChunksMock.mockReturnValueOnce([
+        { ssml: 'a', postPause: 0 },
+        { ssml: 'b', postPause: 0 },
+        { ssml: 'c', postPause: 0 },
+      ]);
+
+      const events: any[] = [];
+      await ttsGenerateFull('a b c', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      const chunkStarts = events.filter((e) => e.kind === 'chunk-start');
+      const chunkCompletes = events.filter((e) => e.kind === 'chunk-complete');
+
+      expect(chunkStarts.map((e) => e.index)).toEqual([0, 1, 2]);
+      expect(chunkStarts.every((e) => e.total === 3)).toBe(true);
+      expect(chunkCompletes.map((e) => e.index)).toEqual([0, 1, 2]);
+      expect(chunkCompletes.every((e) => e.total === 3)).toBe(true);
+    });
+
+    it('coexists with onProgress — both fire independently', async () => {
+      const events: unknown[] = [];
+      const onProgress = vi.fn();
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, onProgress, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      // Both callbacks received calls; onProgress's final call is 100.
+      expect(events.length).toBeGreaterThan(0);
+      expect(onProgress).toHaveBeenCalled();
+      expect(onProgress).toHaveBeenLastCalledWith(100);
+    });
+
+    it('runs without onEvent (omitted) — backward-compatible default', async () => {
+      // Just verifies no throw when consumer doesn't subscribe.
+      await expect(ttsGenerateFull('Hello world', provider, runtimeConfig)).resolves.toBeDefined();
+    });
+  });
+
   it('uses per-call pause table override when supplied (A1)', async () => {
     const callPauses = { CUSTOM_PAUSE: 7.5 };
 
