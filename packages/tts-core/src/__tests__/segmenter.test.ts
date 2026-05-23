@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { parseScript } from '../utils/segmenter';
-import { parsePauseDuration } from '../utils/pause';
 import { DEFAULT_PAUSE_TABLE } from '../defaults';
+import { parsePauseDuration } from '../utils/pause';
+import { parseScript } from '../utils/segmenter';
 
 const logger = {
   debug: () => {},

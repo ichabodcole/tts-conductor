@@ -1,4 +1,7 @@
-import type { TtsProviderContext, TtsRuntimeConfig } from '@tts-conductor/core';
+import type {
+  TtsProviderContext,
+  TtsRuntimeConfig,
+} from '@alien-lobster-buffet/tts-conductor-core';
 import { describe, expect, it } from 'vitest';
 import { elevenLabsProviderFactory } from '../elevenLabsProvider';
 

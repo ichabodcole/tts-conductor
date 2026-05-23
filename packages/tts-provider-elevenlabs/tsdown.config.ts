@@ -8,5 +8,5 @@ export default defineConfig({
   clean: true,
   outDir: 'dist',
   target: 'node18',
-  external: ['@tts-conductor/core'],
+  external: ['@alien-lobster-buffet/tts-conductor-core'],
 });

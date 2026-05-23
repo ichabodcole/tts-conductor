@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { ProviderCapabilities } from '../provider';
 import { toChunks } from '../utils/chunker';
 import type { Segment } from '../utils/segmenter';
-import type { ProviderCapabilities } from '../provider';
 
 const caps: ProviderCapabilities = { maxInlineBreakSeconds: 2, maxCharsPerRequest: 50 };
 const logger = { debug: () => {} } as const;

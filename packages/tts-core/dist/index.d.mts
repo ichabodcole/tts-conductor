@@ -1,3 +1,267 @@
+//#region src/utils/pause.d.ts
+type PauseTable = Record<string, number>;
+/**
+ * Parse pause duration from various pause formats
+ * Supports patterns like:
+ *   [PAUSE:LABEL]
+ *   [PAUSE:LABEL:Nx]
+ *   [PAUSE:LABEL:Ns]
+ *   [PAUSE:Ns]
+ */
+declare function parsePauseDuration(pauseMatch: string, table: PauseTable): number;
+declare function isValidPauseFormat(input: string): boolean;
+declare function extractPauseMarkers(text: string): string[];
+//#endregion
+//#region src/defaults.d.ts
+declare const DEFAULT_PAUSE_TABLE: PauseTable;
+/**
+ * Default timeouts (milliseconds) for each waited operation in the orchestration
+ * pipeline. Consumers can override any subset of these via
+ * {@link TtsRuntimeConfig.timeouts}; whatever they don't supply falls back here.
+ *
+ * Values reflect what the library historically hardcoded and have proven
+ * reasonable in production for ElevenLabs at typical chunk sizes (~1200 chars).
+ * Long segments, slow upstream days, or larger chunk budgets may want higher
+ * values — that's exactly what the override surface is for.
+ */
+declare const DEFAULT_TIMEOUTS: {
+  /** Per-chunk provider.generate() wrapping timeout (entire upstream call). */readonly generate: 60000; /** Per-chunk ffmpeg transcode (MP3 → intermediate WAV). */
+  readonly transcode: 30000; /** Silence-WAV generation (cached after first build per duration). */
+  readonly silenceGen: 30000; /** Concat-demuxer concatenation (fast path). */
+  readonly concat: 45000; /** Filter-graph concat fallback (slower, re-encodes from scratch). */
+  readonly concatFilterFallback: 60000; /** Final audio encode (codec determined by the resolved OutputFormat). */
+  readonly finalEncode: 45000; /** Outer wrap around buildFinalAudio inside the orchestration. */
+  readonly stitch: 45000;
+};
+/**
+ * Shape of a final-output format. Consumers either pick a preset from
+ * {@link OUTPUT_FORMATS} or compose their own. The full object is required —
+ * we deliberately do NOT accept `Partial<OutputFormat>` because mismatched
+ * fields (e.g., Opus codec with MP3 container) silently produce wrong files.
+ *
+ * For custom-but-similar variants, spread a preset and override specific
+ * fields, keeping the codec / container / mimeType triad coherent:
+ *
+ *   const customOpus = { ...OUTPUT_FORMATS.OPUS_64, bitrate: '96k' };
+ *
+ * Fields:
+ * - `codec` — ffmpeg codec name passed to `-c:a` (e.g., `libmp3lame`,
+ *   `libopus`, `flac`, `pcm_s16le`).
+ * - `bitrate` — bitrate string passed to `-b:a` for lossy codecs (`'128k'`,
+ *   `'192k'`, `'320k'`). Omit for lossless codecs (FLAC, PCM) — the field
+ *   should be undefined in those presets.
+ * - `sampleRateHz` — sample rate in Hz passed to `-ar` (44100, 48000, etc.).
+ * - `channels` — channel count passed to `-ac` (1 = mono, 2 = stereo).
+ * - `container` — file extension (without dot) and ffmpeg container name.
+ *   Determines the output filename suffix.
+ * - `mimeType` — MIME type surfaced on `BuildFinalAudioResult.mimeType`.
+ */
+interface OutputFormat {
+  codec: string;
+  bitrate?: string;
+  sampleRateHz: number;
+  channels: number;
+  container: string;
+  mimeType: string;
+}
+/**
+ * Preset output formats covering the common consumer cases. Use one directly:
+ *
+ *   conductor.generateFull(text, provider, undefined, { output: OUTPUT_FORMATS.OPUS_64 });
+ *
+ * Or spread + override for variants (keep codec/container/mimeType coherent):
+ *
+ *   { output: { ...OUTPUT_FORMATS.MP3_192, channels: 2 } }   // stereo MP3
+ *   { output: { ...OUTPUT_FORMATS.OPUS_64, bitrate: '96k' } } // higher-quality Opus
+ *
+ * Notes on the picks:
+ * - Opus presets use 48kHz because Opus is designed around 48kHz internally
+ *   (lower rates get upsampled, wasting bits).
+ * - FLAC and WAV presets omit `bitrate` because they're lossless; supplying
+ *   a bitrate to ffmpeg for these codecs is silently ignored.
+ * - Default sample rate is 44.1kHz / mono — matches ElevenLabs' standard
+ *   MP3 output and the intermediate-audio pipeline.
+ */
+declare const OUTPUT_FORMATS: {
+  /** Spoken-word small-file MP3 — ~half the size of MP3_128 with little quality loss for narration. */readonly MP3_64: {
+    readonly codec: "libmp3lame";
+    readonly bitrate: "64k";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "mp3";
+    readonly mimeType: "audio/mpeg";
+  };
+  readonly MP3_128: {
+    readonly codec: "libmp3lame";
+    readonly bitrate: "128k";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "mp3";
+    readonly mimeType: "audio/mpeg";
+  };
+  readonly MP3_192: {
+    readonly codec: "libmp3lame";
+    readonly bitrate: "192k";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "mp3";
+    readonly mimeType: "audio/mpeg";
+  };
+  readonly MP3_320: {
+    readonly codec: "libmp3lame";
+    readonly bitrate: "320k";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "mp3";
+    readonly mimeType: "audio/mpeg";
+  };
+  readonly OPUS_64: {
+    readonly codec: "libopus";
+    readonly bitrate: "64k";
+    readonly sampleRateHz: 48000;
+    readonly channels: 1;
+    readonly container: "opus";
+    readonly mimeType: "audio/ogg; codecs=opus";
+  };
+  /**
+   * Stereo Opus preset. Note: the intermediate pipeline is always 44.1kHz
+   * mono pcm_s16le (required for ffmpeg concat-demuxer reliability), so
+   * `channels: 2` here duplicates the mono signal across both channels —
+   * the output file is technically stereo but carries no spatial information.
+   * Real stereo TTS would require a different intermediate pipeline.
+   */
+  readonly OPUS_128_STEREO: {
+    readonly codec: "libopus";
+    readonly bitrate: "128k";
+    readonly sampleRateHz: 48000;
+    readonly channels: 2;
+    readonly container: "opus";
+    readonly mimeType: "audio/ogg; codecs=opus";
+  };
+  /**
+   * AAC preset using ffmpeg's native `aac` encoder (always available in
+   * standard ffmpeg builds). Container is `m4a` (MP4 audio), MIME is
+   * `audio/mp4`. Targets iOS/Safari and Apple Podcasts delivery, where AAC
+   * is the native lane.
+   *
+   * Note: `libfdk_aac` is higher-quality than ffmpeg's native `aac` encoder
+   * but is GPL-incompatible and rarely shipped in distributions. Consumers
+   * who have it and want it can compose a custom `OutputFormat` with
+   * `codec: 'libfdk_aac'`.
+   */
+  readonly AAC_128: {
+    readonly codec: "aac";
+    readonly bitrate: "128k";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "m4a";
+    readonly mimeType: "audio/mp4";
+  };
+  readonly FLAC: {
+    readonly codec: "flac";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "flac";
+    readonly mimeType: "audio/flac";
+  };
+  readonly WAV: {
+    readonly codec: "pcm_s16le";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "wav";
+    readonly mimeType: "audio/wav";
+  };
+};
+/**
+ * Default final-output format. MP3 at 192kbps / 44.1kHz / mono — matches what
+ * the library has historically produced. Consumers can pick a different preset
+ * from {@link OUTPUT_FORMATS} or compose a custom {@link OutputFormat} via
+ * {@link BuildAudioOptions.output}.
+ */
+declare const DEFAULT_OUTPUT_FORMAT: OutputFormat;
+//#endregion
+//#region src/events.d.ts
+/**
+ * Lifecycle events emitted by `ttsGenerateFull` during a generation job.
+ *
+ * Consumers subscribe via {@link BuildAudioOptions.onEvent} and receive a
+ * sequence of events as the orchestration progresses. The classic
+ * percentage-based `onProgress` callback is still supported alongside this —
+ * `onEvent` is the richer surface for consumers who need per-chunk visibility
+ * (SSE streams, BullMQ workers reporting structured progress, observability
+ * pipelines, latency-per-chunk analysis, etc.).
+ *
+ * Event ordering for a successful job with N chunks:
+ *
+ *   parse-complete  (once, after parsing + chunking)
+ *   chunk-start     (N times, one per chunk before its upstream call)
+ *   chunk-complete  (N times, after each chunk's audio is ready)
+ *   stitch-start    (once, before ffmpeg concat begins)
+ *   stitch-complete (once, after the final audio is encoded)
+ *
+ * If the job aborts or fails, the promise rejects — there is no `error`
+ * event. Consumers handle failures via `try/catch` or `.catch()`; subscribing
+ * to `onEvent` is purely for progress/observability.
+ */
+type TtsEvent = TtsParseCompleteEvent | TtsChunkStartEvent | TtsChunkCompleteEvent | TtsStitchStartEvent | TtsStitchCompleteEvent;
+/**
+ * Fires once after the script has been parsed into segments and chunked
+ * into provider-sized requests. Lets consumers initialize per-job state
+ * (progress bars, expected-duration estimates, etc.) once the total work
+ * is known.
+ */
+interface TtsParseCompleteEvent {
+  kind: 'parse-complete';
+  /** Number of segments parseScript produced (text + pause segments combined). */
+  segments: number;
+  /** Number of chunks toChunks produced — equals the number of upstream calls. */
+  chunks: number;
+}
+/** Fires immediately before each `provider.generate(...)` call. */
+interface TtsChunkStartEvent {
+  kind: 'chunk-start';
+  /** Zero-based chunk index. */
+  index: number;
+  /** Total chunk count for this job. */
+  total: number;
+}
+/** Fires after each `provider.generate(...)` call returns and the chunk's duration is known. */
+interface TtsChunkCompleteEvent {
+  kind: 'chunk-complete';
+  index: number;
+  total: number;
+  /** Chunk audio duration in seconds (provider-supplied or ffprobe-computed). */
+  duration: number;
+  /** Chunk audio buffer length in bytes — matches `GenerationResult.size` convention. */
+  size: number;
+}
+/** Fires before `buildFinalAudio` starts assembling the chunks. */
+interface TtsStitchStartEvent {
+  kind: 'stitch-start';
+  /** Number of chunks about to be concatenated. */
+  chunks: number;
+}
+/** Fires after the final audio is encoded and ready to return. */
+interface TtsStitchCompleteEvent {
+  kind: 'stitch-complete';
+  /** Final audio duration in seconds (sum of chunk durations + pauses). */
+  duration: number;
+  /** Final audio buffer length in bytes — matches `BuildFinalAudioResult.size` convention. */
+  size: number;
+}
+/**
+ * Subscriber callback. Always invoked synchronously from the orchestration
+ * loop — if the subscriber does expensive work (e.g., HTTP push), wrap it in
+ * a fire-and-forget pattern so it doesn't add latency to the pipeline.
+ *
+ * The return type accepts `void | Promise<void>` so the type system doesn't
+ * silently allow `async (e) => { await db.record(e); }` listeners to look
+ * correct while their returned Promise is dropped on the floor. We do NOT
+ * await the returned Promise — declare it explicitly so callers know the
+ * library treats the listener as fire-and-forget either way.
+ */
+type TtsEventListener = (event: TtsEvent) => void | Promise<void>;
+//#endregion
 //#region src/config.d.ts
 declare enum ProcessStage {
   /** Individual audio chunks from providers */
@@ -5,7 +269,7 @@ declare enum ProcessStage {
   /** Final assembled audio after stitching */
   Final = "final",
   /** Fallback stage when not specified by caller */
-  Unknown = "unknown",
+  Unknown = "unknown"
 }
 interface TtsLogger {
   debug?: (...args: unknown[]) => void;
@@ -27,15 +291,256 @@ interface FfmpegConfig {
   ffmpegPath?: string;
   ffprobePath?: string;
 }
+/**
+ * Per-conductor timeout overrides (all values in milliseconds). Any field left
+ * undefined falls back to the corresponding value in
+ * {@link DEFAULT_TIMEOUTS}. Defaults are conservative for ElevenLabs at
+ * typical chunk sizes; long segments, slow upstream days, or larger chunk
+ * budgets may want higher values.
+ */
+interface TtsTimeouts {
+  /** Per-chunk `provider.generate()` wrapping timeout. */
+  generate?: number;
+  /** Per-chunk ffmpeg transcode (MP3 → intermediate WAV). */
+  transcode?: number;
+  /** Silence-WAV generation (cached after first build per duration). */
+  silenceGen?: number;
+  /** Concat-demuxer concatenation (fast path). */
+  concat?: number;
+  /** Filter-graph concat fallback (slower, re-encodes from scratch). */
+  concatFilterFallback?: number;
+  /** Final audio encode (codec determined by the resolved OutputFormat). */
+  finalEncode?: number;
+  /** Outer wrap around the entire `buildFinalAudio` orchestration. */
+  stitch?: number;
+}
 interface TtsRuntimeConfig {
   /** Map of pause labels (e.g. FULL_BREATH) to seconds */
   pauses: Record<string, number>;
   logger?: TtsLogger;
   debug?: DebugSink;
   ffmpeg?: FfmpegConfig;
+  /**
+   * Per-conductor timeout overrides. Any field left undefined falls back to
+   * `DEFAULT_TIMEOUTS`. See {@link TtsTimeouts}.
+   */
+  timeouts?: TtsTimeouts;
+  /**
+   * Optional upper bound on individual pause durations (in seconds). When
+   * set as a positive number, any `[PAUSE:Xs]` marker in the script that
+   * resolves to a duration greater than this is clamped down to
+   * `maxPauseSeconds` before generating the silence segment. Logged at
+   * `warn` level when a clamp fires.
+   *
+   * Defaults to undefined — no clamp, preserving current behavior for
+   * trusted-input use cases. Setting this is recommended whenever the input
+   * scripts come from untrusted sources: without it, an input like
+   * `[PAUSE:99999s]` would happily generate ~27 hours of silence per chunk.
+   *
+   * `0` and negative values are silently treated as "no clamp" (matches the
+   * defensive validation pattern used for `maxCharsPerRequest`). If you want
+   * to suppress all pauses entirely, configure your pause table so the
+   * relevant labels resolve to 0 — don't try to express that via this field.
+   */
+  maxPauseSeconds?: number;
 }
 interface BuildAudioOptions {
   debugJobId?: string;
+  /**
+   * Per-call pause table override. When provided, this replaces
+   * {@link TtsRuntimeConfig.pauses} for this call only — useful when one
+   * conductor instance serves multiple tenants or contexts that each need
+   * a distinct pause vocabulary without paying for a per-tenant conductor.
+   *
+   * If omitted, the conductor falls back to the pause table on its
+   * {@link TtsRuntimeConfig}.
+   */
+  pauses?: Record<string, number>;
+  /**
+   * Per-call override for {@link ProviderCapabilities.maxCharsPerRequest}.
+   * When provided as a positive integer, chunking uses this limit instead of
+   * the provider's own declared limit — useful for tuning latency / progress
+   * granularity per call without forking the provider.
+   *
+   * Non-positive values (`0` or negative) are silently treated as no override
+   * (every character becoming its own chunk would break the pipeline). If
+   * omitted or invalid, the provider's `caps.maxCharsPerRequest` is used.
+   */
+  maxCharsPerRequest?: number;
+  /**
+   * AbortSignal that cancels the in-flight generation job. The signal is
+   * forwarded to:
+   *   - every `provider.generate()` call (which forwards to the upstream SDK)
+   *   - every internal ffmpeg / ffprobe spawn (via execa's `signal` option)
+   *
+   * When aborted, the returned promise rejects with an `AbortError`. Any chunk
+   * already in progress completes its current await before unwinding. Useful
+   * for BullMQ job cancellation, HTTP request aborts, and similar consumer-side
+   * cancellation flows.
+   */
+  signal?: AbortSignal;
+  /**
+   * Per-call final-output format. Pick a preset from `OUTPUT_FORMATS` or
+   * compose a custom `OutputFormat`. When omitted, falls back to
+   * `DEFAULT_OUTPUT_FORMAT` (MP3 192kbps / 44.1kHz / mono — matches what the
+   * library has historically produced).
+   *
+   * The full object is required — `Partial<OutputFormat>` is not accepted
+   * because mismatched fields (e.g., Opus codec with MP3 container) silently
+   * produce wrong files. To override only some fields of a preset, spread it:
+   *
+   *   { output: { ...OUTPUT_FORMATS.MP3_192, bitrate: '320k' } }
+   */
+  output?: OutputFormat;
+  /**
+   * Subscriber for richer lifecycle events (parse-complete, chunk-start,
+   * chunk-complete, stitch-start, stitch-complete). See {@link TtsEvent} for
+   * the discriminated-union shape.
+   *
+   * Coexists with `onProgress` (the percentage-based callback that's still
+   * available as a positional arg) — both fire independently. Use `onEvent`
+   * when you need per-chunk visibility for SSE streams, BullMQ progress
+   * payloads, latency observability, etc. Use `onProgress` if a simple
+   * 0-100% summary is enough.
+   *
+   * The listener is invoked synchronously from the orchestration loop. If
+   * the subscriber does expensive work (HTTP push, DB write), wrap it in a
+   * fire-and-forget pattern so it doesn't add latency to the pipeline.
+   */
+  onEvent?: TtsEventListener;
+}
+//#endregion
+//#region src/voice-catalog.d.ts
+/**
+ * Cross-provider voice catalog interface. Providers that expose a voice picker
+ * implement this and expose it via {@link TtsProvider.voiceCatalog}. Providers
+ * without a catalog concept (e.g., OpenAI's fixed voice enum, Deepgram's static
+ * model strings, a custom self-hosted server) simply omit the property —
+ * consumers detect availability via `if (provider.voiceCatalog)`.
+ *
+ * The shape was informed by surveying ElevenLabs, Cartesia, Hume, Fish.audio,
+ * PlayHT, Azure, Google, Piper, OpenAI, and Deepgram on 2026-05-23. Field set
+ * captures what appears across ≥3 providers; everything else lives in
+ * {@link VoiceCatalogEntry.raw} for consumers who need provider-specific extras.
+ */
+interface VoiceCatalog<TRaw = unknown> {
+  /**
+   * Fetch the catalog. Accepts an optional query for server-side filtering
+   * where supported (Cartesia, Fish.audio, Hume's provider param); adapters
+   * apply unsupported filters client-side after fetching. The full catalog is
+   * always returned as a flat array — adapters loop through any internal
+   * pagination so consumers don't have to.
+   */
+  listVoices(query?: VoiceCatalogQuery, options?: {
+    signal?: AbortSignal;
+  }): Promise<VoiceCatalogEntry<TRaw>[]>;
+}
+/**
+ * Optional filter knobs passed to {@link VoiceCatalog.listVoices}. Adapters
+ * push these to server-side query params where supported and apply the rest
+ * client-side after fetching. All filters are optional; passing none returns
+ * the full catalog.
+ */
+interface VoiceCatalogQuery {
+  /**
+   * Free-text search across name / description / labels. Providers without
+   * native search (most) apply this client-side; case-insensitive substring
+   * match is the cross-provider baseline.
+   */
+  search?: string;
+  /**
+   * Filter to voices supporting this language. Matched as a prefix against
+   * `VoiceCatalogEntry.languages` entries (e.g., `'en'` matches `'en-US'` and
+   * `'en-GB'`; `'en-US'` matches only `'en-US'`). BCP-47 codes recommended.
+   */
+  language?: string;
+  /**
+   * Filter by gender. Case-insensitive string comparison against
+   * `VoiceCatalogEntry.gender`. Vocabulary varies per provider; consult the
+   * adapter's exported types for the expected values.
+   */
+  gender?: string;
+  /**
+   * Filter to account-owned custom voices only (excludes provider presets and
+   * community-shared voices). Maps to native server-side filters where
+   * available (Cartesia `is_owner`, Hume `CUSTOM_VOICE`, Fish.audio `self`).
+   */
+  customOnly?: boolean;
+}
+/**
+ * Normalized voice record. The common-base fields appear across most providers
+ * with a list endpoint; the `raw: TRaw` field carries the full provider-specific
+ * record for consumers who need extras that don't fit the common shape (e.g.,
+ * PlayHT's `texture` / `tempo` / `style`, Azure's `StyleList` / `RolePlayList`,
+ * Fish.audio's `author` / `like_count`, ElevenLabs' `sharing` / `fine_tuning`).
+ */
+interface VoiceCatalogEntry<TRaw = unknown> {
+  /**
+   * Provider's voice identifier — the opaque string consumers pass to
+   * `provider.generate(...)` (typically via `voiceId` in the per-provider
+   * options). Consumers should treat this as opaque; identifier formats vary
+   * wildly across providers (UUIDs, slugs, encoded BCP-47 strings).
+   */
+  id: string;
+  /** Display name. */
+  name: string;
+  /**
+   * BCP-47 language codes this voice supports. Most voices are
+   * single-language (one entry); multilingual voices (Azure SecondaryLocaleList,
+   * ElevenLabs verified_languages) carry multiple. Empty array means the
+   * provider didn't expose language metadata for this voice.
+   */
+  languages: string[];
+  /**
+   * Gender if the provider exposes it. Free-form string because provider
+   * vocabularies disagree: "masculine"/"feminine"/"gender_neutral" (Cartesia),
+   * "Female"/"Male" (Azure), values embedded in labels (ElevenLabs).
+   */
+  gender?: string;
+  /**
+   * Tier / quality / category indicator. Free-form string because there's no
+   * cross-provider vocabulary: "studio"/"good"/"ok" (ElevenLabs recording
+   * quality), "Neural"/"Standard" (Azure), "low"/"medium"/"high" (Piper),
+   * encoded in the voice ID (Google), `hq: boolean` (PlayHT).
+   */
+  tier?: string;
+  /**
+   * URL to a sample audio preview. Most providers return naked CDN URLs that
+   * can be fetched directly. Some providers (e.g., Cartesia) return URLs that
+   * require the same authentication as the SDK to fetch — consumers should
+   * consult the adapter's package documentation for per-provider fetch
+   * requirements. Treat the URL as opaque from the library's perspective.
+   */
+  previewUrl?: string;
+  /** Description if the provider exposes one. */
+  description?: string;
+  /**
+   * Provider-specific labels (accent, age, use_case, etc.). Free-form because
+   * providers expose different label vocabularies. Consult the adapter's
+   * exported types if your consumer code wants stricter typing.
+   */
+  labels?: Record<string, string>;
+  /**
+   * Whether this voice is an account-owned custom voice (created by cloning or
+   * voice design) vs. a provider-curated preset. Undefined when the provider
+   * doesn't distinguish (e.g., Google, Azure — entirely provider-managed).
+   *
+   * Maps to:
+   * - ElevenLabs: `is_owner === true`
+   * - Cartesia: `is_owner === true`
+   * - Hume: `provider === 'CUSTOM_VOICE'`
+   * - Fish.audio: voices returned from `?self=true`
+   * - PlayHT: voices from the cloned-voices endpoint
+   */
+  custom?: boolean;
+  /**
+   * Full provider-specific record. Consumers who need fields the common shape
+   * doesn't promote (PlayHT's `texture`, Azure's `StyleList`, Fish.audio's
+   * `author`, ElevenLabs' `fine_tuning`, etc.) reach them here. The generic
+   * `TRaw` parameter lets adapters declare a concrete shape so consumers get
+   * IntelliSense rather than `unknown`.
+   */
+  raw: TRaw;
 }
 //#endregion
 //#region src/provider.d.ts
@@ -46,15 +551,68 @@ interface ProviderCapabilities {
   renderInlineBreak?: (seconds: number) => string;
 }
 interface GenerationResult {
+  /** Generated audio for the requested chunk. */
   audio: Buffer;
+  /** MIME type if the provider returns one (e.g., `audio/mpeg`). */
   mimeType?: string;
+  /**
+   * Audio duration in seconds.
+   *
+   * **Providers SHOULD supply this whenever the upstream API returns it.**
+   * When omitted, the orchestrator falls back to running `ffprobe` over the
+   * audio buffer to extract the duration — adds 50-100ms per chunk on the
+   * critical path. For a 20-chunk job that's 1-2 seconds of overhead that
+   * the upstream API already had the answer for.
+   *
+   * If the upstream API returns audio without a duration header (rare, but
+   * possible for some streaming endpoints), leave this undefined and the
+   * ffprobe fallback runs.
+   */
   duration?: number;
+  /** Audio buffer size in bytes if the provider returns it. */
   size?: number;
 }
-interface TtsProvider {
+/**
+ * Per-call options for `TtsProvider.generate()`. Wraps the two orthogonal
+ * concerns that surfaced separately in A2 (per-call overrides) and A3
+ * (cancellation) so the `generate()` signature stays a stable two-argument
+ * shape as we add more per-call concerns later.
+ *
+ * - `overrides` carries provider-specific option overrides (e.g.,
+ *   `ElevenLabsCallOverrides` for the 11labs adapter). Shape comes from the
+ *   provider's `TCallOverrides` generic.
+ * - `signal` is forwarded to the upstream SDK and any internal ffmpeg/ffprobe
+ *   spawn so consumers can wire up BullMQ job cancellation, request aborts,
+ *   etc. Aborting a pending generate rejects the returned Promise.
+ */
+interface GenerateCallOptions<TCallOverrides = never> {
+  overrides?: TCallOverrides;
+  signal?: AbortSignal;
+}
+/**
+ * A TTS provider that turns one chunk of input into one audio buffer.
+ *
+ * The generic `TCallOverrides` lets a provider declare a shape for per-call
+ * option overrides (A/B'ing voices, regenerating with different settings,
+ * etc.) without consumers needing to construct a fresh provider instance
+ * per variation.
+ *
+ * Providers that don't support per-call overrides should leave `TCallOverrides`
+ * at its default of `never`. The second parameter is always optional, so the
+ * contract stays compatible with consumers that only call `provider.generate(chunk)`.
+ */
+interface TtsProvider<TCallOverrides = never> {
   readonly id: string;
   readonly caps: ProviderCapabilities;
-  generate(chunk: string): Promise<GenerationResult>;
+  generate(chunk: string, options?: GenerateCallOptions<TCallOverrides>): Promise<GenerationResult>;
+  /**
+   * Optional voice catalog access. Providers that expose a voice-picker concept
+   * (ElevenLabs, Cartesia, Hume, Fish.audio, PlayHT, Azure, Google, Piper)
+   * implement this; providers without (OpenAI's fixed enum, Deepgram's static
+   * model strings, a custom self-hosted server) leave it undefined. Consumers
+   * detect availability via a simple existence check: `if (provider.voiceCatalog)`.
+   */
+  readonly voiceCatalog?: VoiceCatalog;
 }
 //#endregion
 //#region src/factory.d.ts
@@ -68,7 +626,7 @@ interface TtsProviderContext {
  *
  * Example usage in a provider package:
  *
- * declare module '@tts-conductor/core' {
+ * declare module '@alien-lobster-buffet/tts-conductor-core' {
  *   interface TtsProviderRegistry {
  *     '11labs': ElevenLabsProviderOptions;
  *     'my-provider': MyProviderOptions;
@@ -85,27 +643,47 @@ type ProviderOptionsFor<T extends keyof TtsProviderRegistry> = TtsProviderRegist
  */
 type RegisteredProviderIds = keyof TtsProviderRegistry;
 /**
- * Type-safe factory interface for registered providers.
- * All providers must be registered in TtsProviderRegistry via module augmentation.
+ * Parallel registry for per-call override types. Providers that accept per-call
+ * overrides on `generate()` register their override-shape here via module
+ * augmentation, alongside their construction-time options entry in
+ * `TtsProviderRegistry`. Providers that don't support per-call overrides leave
+ * this unregistered — `CallOverridesFor<T>` resolves to `never` for them.
+ *
+ * Example usage in a provider package:
+ *
+ * declare module '@alien-lobster-buffet/tts-conductor-core' {
+ *   interface TtsProviderRegistry {
+ *     'my-provider': MyProviderOptions;
+ *   }
+ *   interface TtsProviderCallOverridesRegistry {
+ *     'my-provider': MyProviderCallOverrides;
+ *   }
+ * }
  */
-interface TtsProviderFactory<T extends RegisteredProviderIds> {
-  id: T;
-  create: (ctx: TtsProviderContext, options: ProviderOptionsFor<T>) => TtsProvider;
-}
-//#endregion
-//#region src/utils/pause.d.ts
-type PauseTable = Record<string, number>;
+interface TtsProviderCallOverridesRegistry {}
 /**
- * Parse pause duration from various pause formats
- * Supports patterns like:
- *   [PAUSE:LABEL]
- *   [PAUSE:LABEL:Nx]
- *   [PAUSE:LABEL:Ns]
- *   [PAUSE:Ns]
+ * Resolves to the per-call overrides type registered for provider ID `T`, or
+ * `never` if `T` does not have a `TtsProviderCallOverridesRegistry` entry. Used
+ * by `TtsConductor.createProvider` to return a properly-typed provider so
+ * `provider.generate(chunk, overrides)` typechecks against the registered
+ * override shape.
  */
-declare function parsePauseDuration(pauseMatch: string, table: PauseTable): number;
-declare function isValidPauseFormat(input: string): boolean;
-declare function extractPauseMarkers(text: string): string[];
+type CallOverridesFor<T extends string> = T extends keyof TtsProviderCallOverridesRegistry ? TtsProviderCallOverridesRegistry[T] : never;
+/**
+ * Type-safe factory interface for registered providers.
+ *
+ * `TCallOverrides` declares the shape of per-call overrides that the produced
+ * provider accepts as the second argument to `generate()`. Defaults to `never`
+ * for providers that don't support per-call overrides — keeps the factory
+ * signature backward-compatible with v1.1 adapters.
+ *
+ * All providers must be registered in `TtsProviderRegistry` via module
+ * augmentation.
+ */
+interface TtsProviderFactory<T extends RegisteredProviderIds, TCallOverrides = never> {
+  id: T;
+  create: (ctx: TtsProviderContext, options: ProviderOptionsFor<T>) => TtsProvider<TCallOverrides>;
+}
 //#endregion
 //#region src/utils/segmenter.d.ts
 type Segment = {
@@ -131,6 +709,15 @@ interface AudioPart {
   duration: number;
 }
 interface BuildFinalAudioResult {
+  /** Final assembled audio as a Buffer. This is the primary way to read the result. */
+  audio: Buffer;
+  /**
+   * Base64-encoded copy of `audio`, kept for backward compatibility with consumers that
+   * cannot accept Buffers (e.g., JSON-only transport boundaries).
+   *
+   * @deprecated Prefer reading `audio` directly. This field will be removed in v2.0.
+   *   Consumers that need base64 should call `result.audio.toString('base64')` themselves.
+   */
   base64Data: string;
   mimeType: string;
   size: number;
@@ -148,28 +735,113 @@ declare class TtsConductor {
    * Register a provider factory with type-safe options.
    * Provider must be registered in the TtsProviderRegistry via module augmentation.
    */
-  registerProvider<T extends RegisteredProviderIds>(factory: TtsProviderFactory<T>): T;
+  registerProvider<T extends RegisteredProviderIds, TCallOverrides = CallOverridesFor<T>>(factory: TtsProviderFactory<T, TCallOverrides>): T;
   hasProvider(id: string): boolean;
   listProviders(): string[];
   /**
    * Create a provider instance with type-safe options.
    * Provider must be registered in the TtsProviderRegistry via module augmentation.
    */
-  createProvider<T extends RegisteredProviderIds>(id: T, options: ProviderOptionsFor<T>): TtsProvider;
+  createProvider<T extends RegisteredProviderIds>(id: T, options: ProviderOptionsFor<T>): TtsProvider<CallOverridesFor<T>>;
   generateFull(rawText: string, provider: TtsProvider, onProgress?: (percent: number) => void, options?: BuildAudioOptions): Promise<BuildFinalAudioResult>;
 }
 declare function createTtsConductor(config: TtsRuntimeConfig): TtsConductor;
 //#endregion
-//#region src/defaults.d.ts
-declare const DEFAULT_PAUSE_TABLE: PauseTable;
+//#region src/errors.d.ts
+/**
+ * Error hierarchy for TTS provider failures. Adapters convert SDK-specific errors
+ * to these classes so consumers can apply uniform retry / classification logic
+ * without parsing error messages.
+ *
+ * Consumers should use `instanceof` checks rather than string matching:
+ *
+ * ```ts
+ * try {
+ *   await provider.generate(chunk);
+ * } catch (err) {
+ *   if (err instanceof TtsRateLimitError) {
+ *     await sleep(err.retryAfterMs ?? 1000);
+ *     // retry
+ *   } else if (err instanceof TtsTransientError) {
+ *     // exponential backoff
+ *   } else if (err instanceof TtsInvalidInputError) {
+ *     // do not retry; surface to caller
+ *   }
+ * }
+ * ```
+ */
+/** Base class for all TTS provider errors. Direct instances signal an unclassified failure. */
+declare class TtsError extends Error {
+  /** The underlying error that triggered this one, if any. */
+  readonly cause?: unknown;
+  /** HTTP status code from the upstream API, if available. */
+  readonly statusCode?: number;
+  constructor(message: string, options?: {
+    cause?: unknown;
+    statusCode?: number;
+  });
+}
+/**
+ * Provider rejected the request because the caller has exceeded a rate limit.
+ * Retry after `retryAfterMs` if supplied, otherwise apply caller-default backoff.
+ */
+declare class TtsRateLimitError extends TtsError {
+  /** Milliseconds to wait before retrying, parsed from the upstream Retry-After header if present. */
+  readonly retryAfterMs?: number;
+  constructor(message: string, options?: {
+    cause?: unknown;
+    statusCode?: number;
+    retryAfterMs?: number;
+  });
+}
+/**
+ * Provider rejected the request because the caller has exhausted their quota or
+ * subscription tier. Retrying without consumer action (upgrade, top-up) will keep failing.
+ */
+declare class TtsQuotaExceededError extends TtsError {
+  constructor(message: string, options?: {
+    cause?: unknown;
+    statusCode?: number;
+  });
+}
+/**
+ * Provider rejected the credentials. The API key is missing, invalid, or revoked.
+ * Retrying will not help until the caller fixes their authentication.
+ */
+declare class TtsAuthenticationError extends TtsError {
+  constructor(message: string, options?: {
+    cause?: unknown;
+    statusCode?: number;
+  });
+}
+/**
+ * Provider failure that is expected to resolve on retry: 5xx responses, network errors,
+ * upstream timeouts, transient connectivity issues. Safe to retry with exponential backoff.
+ */
+declare class TtsTransientError extends TtsError {
+  constructor(message: string, options?: {
+    cause?: unknown;
+    statusCode?: number;
+  });
+}
+/**
+ * Provider rejected the request because the input was malformed or unprocessable.
+ * Retrying with the same input will not help; the caller must fix the input.
+ */
+declare class TtsInvalidInputError extends TtsError {
+  constructor(message: string, options?: {
+    cause?: unknown;
+    statusCode?: number;
+  });
+}
 //#endregion
 //#region src/operations.d.ts
 declare function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T>;
 declare function ttsGenerateFull(rawText: string, provider: TtsProvider, config: TtsRuntimeConfig, onProgress?: (percent: number) => void, options?: BuildAudioOptions): Promise<BuildFinalAudioResult>;
 //#endregion
 //#region src/utils/duration.d.ts
-declare function getAudioDuration(audioBuffer: Buffer, ffmpegConfig?: FfmpegConfig, logger?: TtsLogger): Promise<number>;
+declare function getAudioDuration(audioBuffer: Buffer, ffmpegConfig?: FfmpegConfig, logger?: TtsLogger, signal?: AbortSignal): Promise<number>;
 declare function estimateAudioDuration(audioBuffer: Buffer, bitrate?: number): number;
 //#endregion
-export { type BuildAudioOptions, type BuildFinalAudioResult, DEFAULT_PAUSE_TABLE, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerationResult, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsConductor, type TtsLogger, type TtsProvider, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, type TtsRuntimeConfig, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
+export { type BuildAudioOptions, type BuildFinalAudioResult, type CallOverridesFor, DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerateCallOptions, type GenerationResult, OUTPUT_FORMATS, type OutputFormat, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsAuthenticationError, type TtsChunkCompleteEvent, type TtsChunkStartEvent, TtsConductor, TtsError, type TtsEvent, type TtsEventListener, TtsInvalidInputError, type TtsLogger, type TtsParseCompleteEvent, type TtsProvider, type TtsProviderCallOverridesRegistry, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, TtsQuotaExceededError, TtsRateLimitError, type TtsRuntimeConfig, type TtsStitchCompleteEvent, type TtsStitchStartEvent, type TtsTimeouts, TtsTransientError, type VoiceCatalog, type VoiceCatalogEntry, type VoiceCatalogQuery, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
 //# sourceMappingURL=index.d.mts.map

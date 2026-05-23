@@ -17,17 +17,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: oven-sh/setup-bun@v2
         with:
-          version: 8
+          bun-version: 1.3.9
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 18
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm build
+      - run: bun install --frozen-lockfile
+      - run: bun run build
 
       - name: Commit dist outputs
         uses: stefanzweifel/git-auto-commit-action@v6

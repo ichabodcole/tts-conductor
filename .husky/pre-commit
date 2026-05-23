@@ -1,1 +1,1 @@
-pnpm verify
+bunx lint-staged && bun run check

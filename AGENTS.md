@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-This pnpm workspace hosts core orchestration and provider packages under `packages/`. Use `packages/tts-core/src` for reusable logic and utilities, `packages/tts-provider-elevenlabs/src` for ElevenLabs bindings, and the matching `__tests__` directories for Vitest suites. Distribution artifacts live in each package’s `dist/` folder and are regenerated via `pnpm --filter <pkg> build`.
+This Bun workspace hosts core orchestration and provider packages under `packages/`. Use `packages/tts-core/src` for reusable logic and utilities, `packages/tts-provider-elevenlabs/src` for ElevenLabs bindings, and the matching `__tests__` directories for Vitest suites. Distribution artifacts live in each package’s `dist/` folder and are regenerated via `bun --filter <pkg> run build`.
 
 - **Docs**: Documents related to the design, architecture and development of the application.
   - Sessions: see `docs/sessions` for a history of previous work session captures.
@@ -10,19 +10,19 @@ This pnpm workspace hosts core orchestration and provider packages under `packag
 
 ## Build, Test, and Development Commands
 
-Run `pnpm install` once to hydrate the workspace. Use `pnpm build` to invoke Turbo’s build pipeline across packages, `pnpm test` for the aggregated Vitest runs, and `pnpm --filter @tts-conductor/core test` (or another filter) to target a single package. Formatting is enforced with `pnpm format` (write) and `pnpm format:check` (CI-friendly). `pnpm lint` executes the shared ESLint configuration.
+Run `bun install` once to hydrate the workspace. Use `bun run build` to invoke Turbo’s build pipeline across packages, `bun run test` for the aggregated Vitest runs, and `bun --filter @alien-lobster-buffet/tts-conductor-core run test` (or another filter) to target a single package. Formatting is applied with `bun run format` (write). `bun run lint` runs Biome’s combined lint + format check (`biome check --error-on-warnings .`); `bun run lint:fix` applies safe auto-fixes. `bun run check` (alias: `bun run verify`) runs typecheck + lint + tests as the pre-merge gate. Markdown is formatted separately with `bun run format:md` (Prettier).
 
 ## Coding Style & Naming Conventions
 
-TypeScript is the canonical language; stick to lowerCamelCase for variables/functions and PascalCase for classes/types. Prettier (see `prettier.config.mjs`) governs layout—100-character width, single quotes, trailing commas. Submit code that passes ESLint (`eslint.config.mjs`) and avoid editing generated `dist/` files directly.
+TypeScript is the canonical language; stick to lowerCamelCase for variables/functions and PascalCase for classes/types. Biome (see `biome.json`) governs layout and lint rules—100-character width, single quotes, trailing commas, semicolons always. Submit code that passes `bun run check` and avoid editing generated `dist/` files directly. Markdown is the one carve-out: it’s formatted by Prettier with defaults via `bun run format:md`.
 
 ## Testing Guidelines
 
-Vitest drives unit tests; colocate files as `*.test.ts` beneath `src/__tests__/`. Ensure mocked ffmpeg interactions don’t hit the real binaries. Aim to cover chunking, segment parsing, and provider adapters before submitting a change. Run `pnpm exec vitest run --config vitest.config.ts` to reproduce the CI matrix locally.
+Vitest drives unit tests; colocate files as `*.test.ts` beneath `src/__tests__/`. Ensure mocked ffmpeg interactions don’t hit the real binaries. Aim to cover chunking, segment parsing, and provider adapters before submitting a change. Run `bunx vitest run --config vitest.config.ts` (or `bun run test`) to reproduce the CI matrix locally.
 
 ## Commit & Pull Request Guidelines
 
-Use concise, imperative commit messages (e.g., “Add ElevenLabs streaming adapter”). Keep logical changes isolated per commit. Pull requests should include: a summary of behavior, referenced issues (`Fixes #123`), test evidence (`pnpm test` output or screenshots), and notes about config or schema updates. Describe any external service requirements (API keys, ffmpeg paths) so reviewers can validate locally.
+Use concise, imperative commit messages (e.g., “Add ElevenLabs streaming adapter”). Keep logical changes isolated per commit. Pull requests should include: a summary of behavior, referenced issues (`Fixes #123`), test evidence (`bun run test` / `bun run check` output or screenshots), and notes about config or schema updates. Describe any external service requirements (API keys, ffmpeg paths) so reviewers can validate locally.
 
 ## Tooling & Environment Notes
 

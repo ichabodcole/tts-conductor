@@ -90,7 +90,7 @@ describe('ttsGenerateFull', () => {
       runtimeConfig.logger,
     );
     expect(toChunksMock).toHaveBeenCalled();
-    expect(generateSpy).toHaveBeenCalledWith('<speak>Hello world</speak>');
+    expect(generateSpy).toHaveBeenCalledWith('<speak>Hello world</speak>', { signal: undefined });
     // Provider supplies duration, so ffprobe should not be called
     expect(getAudioDurationMock).not.toHaveBeenCalled();
     expect(saveDebugFromBufferMock).toHaveBeenCalledWith(
@@ -132,6 +132,37 @@ describe('ttsGenerateFull', () => {
     await expectation;
   });
 
+  it('uses per-conductor timeouts.generate override when supplied', async () => {
+    const slowProvider: TtsProvider = {
+      id: 'slow-provider',
+      caps: provider.caps,
+      generate: () =>
+        new Promise<GenerationResult>((resolve) =>
+          setTimeout(
+            () =>
+              resolve({
+                audio: Buffer.from('late'),
+                duration: 1,
+              }),
+            5_000,
+          ),
+        ),
+    };
+
+    // Custom timeout is 1s — well under the 60s default. Provider takes 5s.
+    const configWithCustomTimeout: TtsRuntimeConfig = {
+      ...runtimeConfig,
+      timeouts: { generate: 1_000 },
+    };
+    const promise = ttsGenerateFull('Hello', slowProvider, configWithCustomTimeout);
+    const expectation = expect(promise).rejects.toThrow(
+      '[tts] Timeout after 1000ms during provider.generate chunk 0',
+    );
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expectation;
+  });
+
   it('trusts provider-supplied duration without calling ffprobe', async () => {
     const providerWithDuration: TtsProvider = {
       id: 'fast-provider',
@@ -169,6 +200,292 @@ describe('ttsGenerateFull', () => {
       expect.any(Buffer),
       runtimeConfig.ffmpeg,
       runtimeConfig.logger,
+      undefined, // signal — none supplied
+    );
+  });
+
+  describe('lifecycle events (A8)', () => {
+    it('fires parse-complete, chunk-start, chunk-complete, stitch-start, stitch-complete in order', async () => {
+      const events: unknown[] = [];
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      // Default mocks produce 1 segment + 1 chunk, so we expect exactly five events.
+      expect(events.map((e: any) => e.kind)).toEqual([
+        'parse-complete',
+        'chunk-start',
+        'chunk-complete',
+        'stitch-start',
+        'stitch-complete',
+      ]);
+    });
+
+    it('parse-complete carries segments and chunks counts', async () => {
+      const events: any[] = [];
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      const parseComplete = events.find((e) => e.kind === 'parse-complete');
+      expect(parseComplete).toEqual({ kind: 'parse-complete', segments: 1, chunks: 1 });
+    });
+
+    it('chunk-start and chunk-complete carry index, total, and chunk-complete includes duration + bytes', async () => {
+      const events: any[] = [];
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      const chunkStart = events.find((e) => e.kind === 'chunk-start');
+      expect(chunkStart).toEqual({ kind: 'chunk-start', index: 0, total: 1 });
+
+      const chunkComplete = events.find((e) => e.kind === 'chunk-complete');
+      expect(chunkComplete).toMatchObject({
+        kind: 'chunk-complete',
+        index: 0,
+        total: 1,
+        duration: 1.25, // provider supplied this in the mock
+        size: expect.any(Number),
+      });
+      expect(chunkComplete.size).toBeGreaterThan(0);
+    });
+
+    it('stitch-complete carries final duration and size from buildFinalAudio result', async () => {
+      const events: any[] = [];
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      // buildFinalAudioMock returns duration: 1.25, size: 4 (from beforeEach).
+      expect(events.find((e) => e.kind === 'stitch-complete')).toEqual({
+        kind: 'stitch-complete',
+        duration: 1.25,
+        size: 4,
+      });
+    });
+
+    it('fires chunk-start/complete with sequential indices for a multi-chunk job', async () => {
+      // Override the toChunks mock with 3 chunks so we can verify the
+      // index progression across the loop.
+      toChunksMock.mockReturnValueOnce([
+        { ssml: 'a', postPause: 0 },
+        { ssml: 'b', postPause: 0 },
+        { ssml: 'c', postPause: 0 },
+      ]);
+
+      const events: any[] = [];
+      await ttsGenerateFull('a b c', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      const chunkStarts = events.filter((e) => e.kind === 'chunk-start');
+      const chunkCompletes = events.filter((e) => e.kind === 'chunk-complete');
+
+      expect(chunkStarts.map((e) => e.index)).toEqual([0, 1, 2]);
+      expect(chunkStarts.every((e) => e.total === 3)).toBe(true);
+      expect(chunkCompletes.map((e) => e.index)).toEqual([0, 1, 2]);
+      expect(chunkCompletes.every((e) => e.total === 3)).toBe(true);
+    });
+
+    it('coexists with onProgress — both fire independently', async () => {
+      const events: unknown[] = [];
+      const onProgress = vi.fn();
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, onProgress, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      // Both callbacks received calls; onProgress's final call is 100.
+      expect(events.length).toBeGreaterThan(0);
+      expect(onProgress).toHaveBeenCalled();
+      expect(onProgress).toHaveBeenLastCalledWith(100);
+    });
+
+    it('runs without onEvent (omitted) — backward-compatible default', async () => {
+      // Just verifies no throw when consumer doesn't subscribe.
+      await expect(ttsGenerateFull('Hello world', provider, runtimeConfig)).resolves.toBeDefined();
+    });
+
+    it('emits onProgress(0) immediately before parse-complete (D8a)', async () => {
+      // Dual-subscriber consumers (onProgress + onEvent) get a matching
+      // progress tick at every event boundary — without this, parse-complete
+      // was the only event with no corresponding onProgress emission.
+      const events: { kind: string }[] = [];
+      const onProgress = vi.fn();
+
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, onProgress, {
+        onEvent: (e) => {
+          events.push(e as { kind: string });
+        },
+      });
+
+      // First onProgress call is 0 (immediately before parse-complete fires).
+      expect(onProgress.mock.calls[0]).toEqual([0]);
+      // The first event in the stream is parse-complete.
+      expect(events[0]?.kind).toBe('parse-complete');
+    });
+  });
+
+  it('uses per-call pause table override when supplied (A1)', async () => {
+    const callPauses = { CUSTOM_PAUSE: 7.5 };
+
+    await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+      pauses: callPauses,
+    });
+
+    // parseScript should receive the per-call pauses, NOT the runtime-config pauses
+    expect(parseScriptMock).toHaveBeenCalledWith('Hello world', callPauses, runtimeConfig.logger);
+    expect(parseScriptMock).not.toHaveBeenCalledWith(
+      'Hello world',
+      runtimeConfig.pauses,
+      runtimeConfig.logger,
+    );
+  });
+
+  it('falls back to runtime-config pauses when no per-call override (A1)', async () => {
+    await ttsGenerateFull('Hello world', provider, runtimeConfig);
+
+    expect(parseScriptMock).toHaveBeenCalledWith(
+      'Hello world',
+      runtimeConfig.pauses,
+      runtimeConfig.logger,
+    );
+  });
+
+  it('uses per-call maxCharsPerRequest override when supplied (A5)', async () => {
+    await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+      maxCharsPerRequest: 50,
+    });
+
+    // toChunks should receive caps with the overridden maxCharsPerRequest
+    expect(toChunksMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ maxCharsPerRequest: 50 }),
+      runtimeConfig.logger,
+    );
+    // Sanity: the provider's own caps had a different value
+    expect(provider.caps.maxCharsPerRequest).not.toBe(50);
+  });
+
+  it('falls back to provider caps when no per-call maxCharsPerRequest (A5)', async () => {
+    await ttsGenerateFull('Hello world', provider, runtimeConfig);
+
+    expect(toChunksMock).toHaveBeenCalledWith(
+      expect.anything(),
+      provider.caps,
+      runtimeConfig.logger,
+    );
+  });
+
+  it('clamps pause durations above maxPauseSeconds (V6)', async () => {
+    // Pause segment with 60s requested; cap at 10s.
+    parseScriptMock.mockReturnValueOnce([
+      { kind: 'text', value: 'Hello' },
+      { kind: 'pause', label: 'LONG', seconds: 60 },
+      { kind: 'text', value: 'World' },
+    ]);
+    const warn = vi.fn();
+    const config: TtsRuntimeConfig = {
+      ...runtimeConfig,
+      logger: { ...runtimeConfig.logger, warn },
+      maxPauseSeconds: 10,
+    };
+
+    await ttsGenerateFull('Hello [PAUSE:LONG] World', provider, config);
+
+    // toChunks should receive segments where the pause's seconds is clamped to 10.
+    const segmentsArg = toChunksMock.mock.calls[0]?.[0] as Array<{
+      kind: string;
+      seconds?: number;
+    }>;
+    const pauseSeg = segmentsArg.find((s) => s.kind === 'pause');
+    expect(pauseSeg?.seconds).toBe(10);
+    // And the consumer is told via warn-level log.
+    expect(warn).toHaveBeenCalledWith(
+      '[tts] Pause duration clamped',
+      expect.objectContaining({ requested: 60, clampedTo: 10 }),
+    );
+  });
+
+  it('does not clamp pauses when maxPauseSeconds is unset (V6 default-off)', async () => {
+    parseScriptMock.mockReturnValueOnce([{ kind: 'pause', label: 'LONG', seconds: 60 }]);
+
+    await ttsGenerateFull('[PAUSE:LONG]', provider, runtimeConfig);
+
+    const segmentsArg = toChunksMock.mock.calls[0]?.[0] as Array<{
+      kind: string;
+      seconds?: number;
+    }>;
+    const pauseSeg = segmentsArg.find((s) => s.kind === 'pause');
+    // Untouched — no clamp configured.
+    expect(pauseSeg?.seconds).toBe(60);
+  });
+
+  it('throws AbortError immediately when the signal is already aborted (A3)', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    // Assert the error TYPE, not just that something was thrown — a wrong-error
+    // regression (e.g., the abort getting wrapped into TtsError) would otherwise
+    // silently pass this test.
+    await expect(
+      ttsGenerateFull('Hello', provider, runtimeConfig, undefined, { signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+
+    // No upstream call should have happened — we bailed before parseScript ran.
+    expect(parseScriptMock).not.toHaveBeenCalled();
+  });
+
+  it('forwards the signal to provider.generate (A3)', async () => {
+    const controller = new AbortController();
+    const generateSpy = vi.spyOn(provider, 'generate');
+
+    await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+      signal: controller.signal,
+    });
+
+    expect(generateSpy).toHaveBeenCalledWith(
+      '<speak>Hello world</speak>',
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
+
+  it('forwards the signal to getAudioDuration when provider omits duration (A3)', async () => {
+    const providerWithoutDuration: TtsProvider = {
+      id: 'no-duration-provider',
+      caps: provider.caps,
+      async generate() {
+        return { audio: Buffer.from('fake') };
+      },
+    };
+    const controller = new AbortController();
+
+    await ttsGenerateFull('Hello', providerWithoutDuration, runtimeConfig, undefined, {
+      signal: controller.signal,
+    });
+
+    expect(getAudioDurationMock).toHaveBeenCalledWith(
+      expect.any(Buffer),
+      runtimeConfig.ffmpeg,
+      runtimeConfig.logger,
+      controller.signal,
     );
   });
 });

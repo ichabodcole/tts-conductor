@@ -1,11 +1,28 @@
+import fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { execa } from 'execa';
-import fs from 'fs/promises';
-import { tmpdir } from 'os';
-import path from 'path';
 import type { BuildAudioOptions, FfmpegConfig, TtsLogger, TtsRuntimeConfig } from '../config';
 import { ProcessStage } from '../config';
+import { DEFAULT_OUTPUT_FORMAT, DEFAULT_TIMEOUTS, INTERMEDIATE_AUDIO } from '../defaults';
 import type { Chunk } from './chunker';
 import { saveDebugFromFile } from './debug';
+
+// Shorthand for the most-used intermediate-audio values, plus their string forms
+// for ffmpeg arg arrays (ffmpeg expects strings on the command line). These are
+// NOT user-configurable — see INTERMEDIATE_AUDIO in defaults.ts for the
+// rationale (ffmpeg concat-demuxer reliability).
+const INTER_SAMPLE_RATE_STR = String(INTERMEDIATE_AUDIO.sampleRateHz);
+const INTER_CHANNELS_STR = String(INTERMEDIATE_AUDIO.channels);
+const INTER_CODEC = INTERMEDIATE_AUDIO.codec;
+
+// Derived filter-graph values that must stay consistent with the constants
+// above. ffmpeg's filter graph uses different vocabulary than CLI args:
+//   - channel_layouts wants a layout NAME ('mono' / 'stereo'), not a count
+//   - sample_fmts wants a sample-format short name ('s16' for pcm_s16le)
+// Centralizing these makes the coupling to INTERMEDIATE_AUDIO explicit.
+const INTER_CHANNEL_LAYOUT = INTERMEDIATE_AUDIO.channels === 1 ? 'mono' : 'stereo';
+const INTER_SAMPLE_FMT = 's16'; // s16 is the sample_fmt for pcm_s16le
 
 interface AudioPart {
   buffer: Buffer;
@@ -14,6 +31,19 @@ interface AudioPart {
 
 const silenceCache = new Map<number, string>();
 const MAX_SILENCE_CACHE_SIZE = 50;
+
+/**
+ * Generate a short random token for temp-file names. Combined with
+ * `Date.now()` and the chunk index this makes concurrent `buildFinalAudio`
+ * calls collision-safe: two jobs hitting chunk 0 within the same millisecond
+ * each get distinct token strings, so they don't clobber each other's
+ * intermediate files in `os.tmpdir()`. Six base36 characters give ~2 billion
+ * combinations per millisecond — effectively impossible to collide in
+ * practice.
+ */
+function tempToken(): string {
+  return Math.random().toString(36).slice(2, 8);
+}
 
 async function resolveFfmpegBin(ffmpegConfig?: FfmpegConfig): Promise<string> {
   const candidates = [
@@ -44,10 +74,29 @@ async function resolveFfmpegBin(ffmpegConfig?: FfmpegConfig): Promise<string> {
   return 'ffmpeg';
 }
 
-async function genSilenceWav(seconds: number, ffmpegConfig?: FfmpegConfig, logger?: TtsLogger) {
-  if (silenceCache.has(seconds)) return silenceCache.get(seconds)!;
+/**
+ * Round a pause-duration to 0.1s precision for silence-cache key lookups.
+ * Without this, 1.7 and 1.71 would generate two separate WAV files even
+ * though the perceptual difference is negligible. Rounded to one decimal,
+ * the cache hit rate stays high while preserving meaningful pause variation.
+ * The underlying file is still generated at the rounded duration — the
+ * cache key and the generated content are intentionally aligned.
+ */
+function silenceCacheKey(seconds: number): number {
+  return Math.round(seconds * 10) / 10;
+}
 
-  const out = path.join(tmpdir(), `tts_conductor_silence_${seconds}.wav`);
+async function genSilenceWav(
+  seconds: number,
+  ffmpegConfig?: FfmpegConfig,
+  logger?: TtsLogger,
+  signal?: AbortSignal,
+  timeoutMs: number = DEFAULT_TIMEOUTS.silenceGen,
+) {
+  const key = silenceCacheKey(seconds);
+  if (silenceCache.has(key)) return silenceCache.get(key)!;
+
+  const out = path.join(tmpdir(), `tts_conductor_silence_${key}.wav`);
   const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
 
   try {
@@ -57,19 +106,19 @@ async function genSilenceWav(seconds: number, ffmpegConfig?: FfmpegConfig, logge
         '-f',
         'lavfi',
         '-i',
-        `anullsrc=r=44100:cl=mono`,
+        `anullsrc=r=${INTERMEDIATE_AUDIO.sampleRateHz}:cl=${INTER_CHANNEL_LAYOUT}`,
         '-t',
-        seconds.toString(),
+        key.toString(),
         '-ac',
-        '1',
+        INTER_CHANNELS_STR,
         '-ar',
-        '44100',
+        INTER_SAMPLE_RATE_STR,
         '-c:a',
-        'pcm_s16le',
+        INTER_CODEC,
         '-y',
         out,
       ],
-      { timeout: 30000 },
+      { timeout: timeoutMs, cancelSignal: signal },
     );
   } catch (error) {
     logger?.error?.('Failed to generate silence segment', { seconds, error });
@@ -92,7 +141,7 @@ async function genSilenceWav(seconds: number, ffmpegConfig?: FfmpegConfig, logge
     }
   }
 
-  silenceCache.set(seconds, out);
+  silenceCache.set(key, out);
   return out;
 }
 
@@ -101,8 +150,11 @@ async function concatParts(
   outPath: string,
   ffmpegConfig?: FfmpegConfig,
   logger?: TtsLogger,
+  signal?: AbortSignal,
+  concatTimeoutMs: number = DEFAULT_TIMEOUTS.concat,
+  filterFallbackTimeoutMs: number = DEFAULT_TIMEOUTS.concatFilterFallback,
 ) {
-  const listFile = path.join(tmpdir(), `tts_conductor_concat_${Date.now()}.txt`);
+  const listFile = path.join(tmpdir(), `tts_conductor_concat_${Date.now()}_${tempToken()}.txt`);
 
   try {
     await fs.writeFile(
@@ -123,40 +175,43 @@ async function concatParts(
           '-i',
           listFile,
           '-c:a',
-          'pcm_s16le',
+          INTER_CODEC,
           '-ar',
-          '44100',
+          INTER_SAMPLE_RATE_STR,
           '-ac',
-          '1',
+          INTER_CHANNELS_STR,
           '-y',
           outPath,
         ],
-        { timeout: 45000 },
+        { timeout: concatTimeoutMs, cancelSignal: signal },
       );
       return;
     } catch (error) {
+      // If the abort fired, propagate without trying the filter fallback —
+      // the consumer asked us to stop, not to retry differently.
+      if (signal?.aborted) throw error;
       logger?.warn?.('Concat demuxer failed, attempting filter fallback', error);
       const args: string[] = [];
       for (const file of fileList) {
         args.push('-i', file);
       }
       const n = fileList.length;
-      const filter = `${Array.from({ length: n }, (_, i) => `[${i}:a]`).join('')}concat=n=${n}:v=0:a=1, aformat=sample_fmts=s16:sample_rates=44100:channel_layouts=mono [a]`;
+      const filter = `${Array.from({ length: n }, (_, i) => `[${i}:a]`).join('')}concat=n=${n}:v=0:a=1, aformat=sample_fmts=${INTER_SAMPLE_FMT}:sample_rates=${INTERMEDIATE_AUDIO.sampleRateHz}:channel_layouts=${INTER_CHANNEL_LAYOUT} [a]`;
       args.push(
         '-filter_complex',
         filter,
         '-map',
         '[a]',
         '-c:a',
-        'pcm_s16le',
+        INTER_CODEC,
         '-ar',
-        '44100',
+        INTER_SAMPLE_RATE_STR,
         '-ac',
-        '1',
+        INTER_CHANNELS_STR,
         '-y',
         outPath,
       );
-      await execa(ffmpegBin, args, { timeout: 60000 });
+      await execa(ffmpegBin, args, { timeout: filterFallbackTimeoutMs, cancelSignal: signal });
     }
   } finally {
     try {
@@ -168,6 +223,15 @@ async function concatParts(
 }
 
 export interface BuildFinalAudioResult {
+  /** Final assembled audio as a Buffer. This is the primary way to read the result. */
+  audio: Buffer;
+  /**
+   * Base64-encoded copy of `audio`, kept for backward compatibility with consumers that
+   * cannot accept Buffers (e.g., JSON-only transport boundaries).
+   *
+   * @deprecated Prefer reading `audio` directly. This field will be removed in v2.0.
+   *   Consumers that need base64 should call `result.audio.toString('base64')` themselves.
+   */
   base64Data: string;
   mimeType: string;
   size: number;
@@ -178,7 +242,7 @@ export async function buildFinalAudio(
   config: TtsRuntimeConfig,
   chunks: Chunk[],
   audio: AudioPart[],
-  fileName = `tts_${Date.now()}.mp3`,
+  fileName?: string,
   options?: BuildAudioOptions,
 ): Promise<BuildFinalAudioResult> {
   if (chunks.length !== audio.length) {
@@ -187,23 +251,70 @@ export async function buildFinalAudio(
 
   const logger = config.logger;
   const ffmpegConfig = config.ffmpeg;
+  const signal = options?.signal;
+  // A7: resolve the output format once. Consumers either pass a full
+  // OutputFormat preset (e.g., OUTPUT_FORMATS.OPUS_64) or compose a custom
+  // one. No Partial-merge — would silently produce mismatched files.
+  const outputFormat = options?.output ?? DEFAULT_OUTPUT_FORMAT;
+  // Default filename includes the right container extension so debug sinks
+  // and consumer disk-writes get the right suffix. Consumer-supplied
+  // fileName is honored verbatim (consumer's responsibility to match).
+  const resolvedFileName = fileName ?? `tts_${Date.now()}_${tempToken()}.${outputFormat.container}`;
+  // D2: warn when a consumer-supplied filename's extension doesn't match the
+  // output codec's container. We still honor the consumer's exact filename
+  // (renaming would be more surprising than the mismatch), but a warning
+  // surfaces the foot-gun before it ships as "my .mp3 file won't play."
+  if (fileName) {
+    const dotIdx = fileName.lastIndexOf('.');
+    const ext = dotIdx >= 0 ? fileName.slice(dotIdx + 1).toLowerCase() : '';
+    if (ext && ext !== outputFormat.container.toLowerCase()) {
+      logger?.warn?.('[tts] Output filename extension does not match codec container', {
+        fileName,
+        fileExtension: ext,
+        container: outputFormat.container,
+        codec: outputFormat.codec,
+      });
+    }
+  }
+  // Resolve timeouts once at the orchestration boundary so all helpers
+  // receive primitive numbers, not the optional config shape.
+  const timeouts = { ...DEFAULT_TIMEOUTS, ...(config.timeouts ?? {}) };
   const tmp = tmpdir();
   const partFiles: string[] = [];
   const tempFilesToCleanup: string[] = [];
 
   try {
+    signal?.throwIfAborted();
     const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
     for (let i = 0; i < audio.length; i++) {
-      const speechMp3 = path.join(tmp, `tts_chunk_${i}_${Date.now()}.mp3`);
-      const speechWav = path.join(tmp, `tts_chunk_${i}_${Date.now()}.wav`);
+      signal?.throwIfAborted();
+
+      // Random suffix per chunk so two concurrent buildFinalAudio calls
+      // hitting chunk index `i` within the same millisecond don't collide
+      // on the same temp paths. Six base36 chars → effectively zero
+      // collision risk in practice.
+      const chunkToken = tempToken();
+      const speechMp3 = path.join(tmp, `tts_chunk_${i}_${Date.now()}_${chunkToken}.mp3`);
+      const speechWav = path.join(tmp, `tts_chunk_${i}_${Date.now()}_${chunkToken}.wav`);
 
       await fs.writeFile(speechMp3, audio[i]?.buffer ?? Buffer.alloc(0));
       tempFilesToCleanup.push(speechMp3);
 
       await execa(
         ffmpegBin,
-        ['-i', speechMp3, '-ar', '44100', '-ac', '1', '-c:a', 'pcm_s16le', '-y', speechWav],
-        { timeout: 30000 },
+        [
+          '-i',
+          speechMp3,
+          '-ar',
+          INTER_SAMPLE_RATE_STR,
+          '-ac',
+          INTER_CHANNELS_STR,
+          '-c:a',
+          INTER_CODEC,
+          '-y',
+          speechWav,
+        ],
+        { timeout: timeouts.transcode, cancelSignal: signal },
       );
 
       partFiles.push(speechWav);
@@ -212,26 +323,59 @@ export async function buildFinalAudio(
       const chunk = chunks[i];
       const pauseSeconds = chunk?.postPause ?? 0;
       if (pauseSeconds > 0) {
-        const silenceFile = await genSilenceWav(pauseSeconds, ffmpegConfig, logger);
+        const silenceFile = await genSilenceWav(
+          pauseSeconds,
+          ffmpegConfig,
+          logger,
+          signal,
+          timeouts.silenceGen,
+        );
         partFiles.push(silenceFile);
       }
     }
 
-    const outWavPath = path.join(tmp, `tts_concat_${Date.now()}.wav`);
+    signal?.throwIfAborted();
+    const outWavPath = path.join(tmp, `tts_concat_${Date.now()}_${tempToken()}.wav`);
     tempFilesToCleanup.push(outWavPath);
-    await concatParts(partFiles, outWavPath, ffmpegConfig, logger);
-
-    const outPath = path.join(tmp, fileName);
-    tempFilesToCleanup.push(outPath);
-
-    await execa(
-      ffmpegBin,
-      ['-i', outWavPath, '-c:a', 'libmp3lame', '-ar', '44100', '-b:a', '192k', '-y', outPath],
-      { timeout: 45000 },
+    await concatParts(
+      partFiles,
+      outWavPath,
+      ffmpegConfig,
+      logger,
+      signal,
+      timeouts.concat,
+      timeouts.concatFilterFallback,
     );
 
+    const outPath = path.join(tmp, resolvedFileName);
+    tempFilesToCleanup.push(outPath);
+
+    // Build the final-encode args from the resolved OutputFormat. `-b:a` is
+    // only emitted for lossy codecs that declared a bitrate; lossless codecs
+    // (FLAC, PCM) omit the field intentionally — supplying it would be
+    // silently ignored by ffmpeg.
+    const finalEncodeArgs = [
+      '-i',
+      outWavPath,
+      '-c:a',
+      outputFormat.codec,
+      '-ar',
+      String(outputFormat.sampleRateHz),
+      '-ac',
+      String(outputFormat.channels),
+    ];
+    if (outputFormat.bitrate) {
+      finalEncodeArgs.push('-b:a', outputFormat.bitrate);
+    }
+    finalEncodeArgs.push('-y', outPath);
+
+    await execa(ffmpegBin, finalEncodeArgs, {
+      timeout: timeouts.finalEncode,
+      cancelSignal: signal,
+    });
+
     await saveDebugFromFile(config, outPath, {
-      fileName: `final_${fileName}`,
+      fileName: `final_${resolvedFileName}`,
       jobId: options?.debugJobId,
       stage: ProcessStage.Final,
     });
@@ -244,8 +388,9 @@ export async function buildFinalAudio(
     }, 0);
 
     const result: BuildFinalAudioResult = {
+      audio: buf,
       base64Data: buf.toString('base64'),
-      mimeType: 'audio/mpeg',
+      mimeType: outputFormat.mimeType,
       size: buf.length,
       duration: durationSec,
     };

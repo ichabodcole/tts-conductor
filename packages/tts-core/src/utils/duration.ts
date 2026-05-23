@@ -1,10 +1,10 @@
+import fs from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { execa } from 'execa';
 import ffmpegPath from 'ffmpeg-static';
-import fs from 'fs/promises';
-import path from 'path';
-import { tmpdir } from 'os';
-import type { FfmpegConfig } from '../config';
-import type { TtsLogger } from '../config';
+import type { FfmpegConfig, TtsLogger } from '../config';
+import { DEFAULT_ESTIMATED_BITRATE_KBPS } from '../defaults';
 
 async function resolveFfprobeBin(ffmpegConfig?: FfmpegConfig): Promise<string> {
   const candidates = [ffmpegConfig?.ffprobePath, process.env.FFPROBE_PATH, 'ffprobe'].filter(
@@ -54,8 +54,12 @@ export async function getAudioDuration(
   audioBuffer: Buffer,
   ffmpegConfig?: FfmpegConfig,
   logger?: TtsLogger,
+  signal?: AbortSignal,
 ): Promise<number> {
-  const tempFile = path.join(tmpdir(), `tts_conductor_temp_${Date.now()}.mp3`);
+  // Random suffix avoids concurrent-call collisions in os.tmpdir(); see
+  // tempToken() in stitcher.ts for the rationale.
+  const randomToken = Math.random().toString(36).slice(2, 8);
+  const tempFile = path.join(tmpdir(), `tts_conductor_temp_${Date.now()}_${randomToken}.mp3`);
 
   try {
     await fs.writeFile(tempFile, audioBuffer);
@@ -72,7 +76,7 @@ export async function getAudioDuration(
         'default=noprint_wrappers=1:nokey=1',
         tempFile,
       ],
-      { reject: false },
+      { reject: false, cancelSignal: signal },
     );
     const probeOut = ffprobeResult.stdout?.toString().trim() ?? '';
     const parsedProbe = parseFloat(probeOut);
@@ -81,7 +85,10 @@ export async function getAudioDuration(
     }
 
     const ffmpegBin = await resolveFfmpegBin(ffmpegConfig);
-    const ffmpegResult = await execa(ffmpegBin, ['-i', tempFile], { reject: false });
+    const ffmpegResult = await execa(ffmpegBin, ['-i', tempFile], {
+      reject: false,
+      cancelSignal: signal,
+    });
     const stderr = ffmpegResult.stderr?.toString() ?? '';
     const match = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
     if (match) {
@@ -104,6 +111,9 @@ export async function getAudioDuration(
   return estimateAudioDuration(audioBuffer);
 }
 
-export function estimateAudioDuration(audioBuffer: Buffer, bitrate = 128): number {
+export function estimateAudioDuration(
+  audioBuffer: Buffer,
+  bitrate: number = DEFAULT_ESTIMATED_BITRATE_KBPS,
+): number {
   return Math.round(((audioBuffer.length * 8) / (bitrate * 1000)) * 100) / 100;
 }

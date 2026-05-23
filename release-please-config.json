@@ -3,14 +3,14 @@
   "packages": {
     "packages/tts-core": {
       "release-type": "node",
-      "package-name": "@tts-conductor/core",
-      "component": "@tts-conductor/core",
+      "package-name": "@alien-lobster-buffet/tts-conductor-core",
+      "component": "@alien-lobster-buffet/tts-conductor-core",
       "changelog-path": "CHANGELOG.md"
     },
     "packages/tts-provider-elevenlabs": {
       "release-type": "node",
-      "package-name": "@tts-conductor/provider-elevenlabs",
-      "component": "@tts-conductor/provider-elevenlabs",
+      "package-name": "@alien-lobster-buffet/tts-conductor-elevenlabs",
+      "component": "@alien-lobster-buffet/tts-conductor-elevenlabs",
       "changelog-path": "CHANGELOG.md"
     }
   }
