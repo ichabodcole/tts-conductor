@@ -11,6 +11,7 @@ import type {
   TtsProvider,
   TtsProviderContext,
   TtsProviderFactory,
+  VoiceCatalog,
 } from '@tts-conductor/core';
 import {
   getAudioDuration,
@@ -21,6 +22,7 @@ import {
   TtsRateLimitError,
   TtsTransientError,
 } from '@tts-conductor/core';
+import { type ElevenLabsRawVoice, ElevenLabsVoiceCatalog } from './voiceCatalog';
 
 export interface ElevenLabsVoiceSettings {
   stability?: number | null;
@@ -136,6 +138,7 @@ const CAPS: ProviderCapabilities = {
 class ElevenLabsProvider implements TtsProvider<ElevenLabsCallOverrides> {
   readonly id: string;
   readonly caps = CAPS;
+  readonly voiceCatalog: VoiceCatalog<ElevenLabsRawVoice>;
   private client: ElevenLabsClient;
 
   constructor(
@@ -144,6 +147,7 @@ class ElevenLabsProvider implements TtsProvider<ElevenLabsCallOverrides> {
   ) {
     this.id = ctx.id;
     this.client = new ElevenLabsClient({ apiKey: options.apiKey });
+    this.voiceCatalog = new ElevenLabsVoiceCatalog(this.client);
   }
 
   async generate(

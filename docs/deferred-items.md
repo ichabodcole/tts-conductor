@@ -82,6 +82,18 @@ Three buckets:
 
 **Recommendation:** Refactor when the test file is next touched (likely during A6 voice catalog work, which lives in the same provider package). Low priority; current behavior is correct.
 
+### D8c. ElevenLabs adapter known limitations
+
+**Source:** A6 voice catalog review (2026-05-23).
+
+**Context:** Documenting two minor limitations of the ElevenLabs voice catalog mapping, both consequences of how the SDK exposes data rather than bugs in our adapter:
+
+- **`gender` extraction is label-key-sensitive.** ElevenLabs encodes gender as a free-form label (`voice.labels.gender`) rather than a structured field. The adapter reads `voice.labels?.gender` directly. If the SDK ever changes the key casing (e.g., `Gender` capitalized) or a custom voice omits the label, `gender` is undefined. Not a bug — matches the JSDoc contract that `VoiceCatalogEntry.gender` is "free-form because providers don't agree." Worth knowing.
+
+- **`tier` falls back from `recordingQuality` to `category`.** `recordingQuality` describes audio fidelity ("studio"/"good"/"ok"); `category` describes origin ("premade"/"cloned"/"professional"). Picker UIs that care about the distinction should reach into `entry.raw` for `recordingQuality` and `category` separately rather than relying on the conflated `tier` field. Documented in JSDoc on the catalog entry shape.
+
+**Recommendation:** No code change. These are surface-level documentation items — keep them flagged here so if a consumer reports surprising `gender: undefined` results we know where to point them, and if we ever add other provider adapters we can audit whether the same patterns apply.
+
 ### D8a. `parse-complete` has no `onProgress` counterpart
 
 **Source:** A8 (richer events) review.
@@ -89,6 +101,16 @@ Three buckets:
 **Context:** The new lifecycle events fire at 5 points (parse-complete, chunk-start, chunk-complete, stitch-start, stitch-complete). At each point that has an `onProgress` percentage emission, the events fire in the same order. **But** `parse-complete` has no `onProgress` counterpart — when it fires, the percentage is still at 0%. Dual-subscriber consumers (using both `onProgress` and `onEvent`) will see the event without a matching progress tick.
 
 **Recommendation:** Either emit `onProgress?.(0)` immediately before `parse-complete` (cheap, makes the contract symmetric) or document the asymmetry inline. The current state is functionally correct but quietly inconsistent. Lean toward the explicit `onProgress?.(0)` call — it's one line and removes the surprise.
+
+### D8b. `fetchPreview` helper on provider / adapter
+
+**Source:** A6 design conversation (2026-05-23).
+
+**Context:** `VoiceCatalogEntry.previewUrl` is a bare string. Naked-CDN providers (ElevenLabs, PlayHT) return URLs that work directly; auth-gated providers (Cartesia) return URLs that need the same auth as the SDK. Per-adapter docs cover how to fetch.
+
+For consumers who'd rather not write the fetch logic themselves, we could add a `fetchPreview(url, signal?)` helper on the provider (or as a free function exported from each adapter). The provider already has the auth context — it can return a Blob / ArrayBuffer / Buffer the consumer plays directly.
+
+**Recommendation:** Add when a real consumer asks. Pre-emptively adding a method that wraps a 3-line `fetch` call is over-engineering. Re-evaluate once we have actual consumer feedback or once a provider with more complex preview-auth (signed URLs, rotating tokens) joins. Confirmed mutual interest in this on 2026-05-23.
 
 ### D8. Pre-existing temp-file collision (`stitcher.ts` `tts_chunk_${i}_${Date.now()}.mp3`)
 

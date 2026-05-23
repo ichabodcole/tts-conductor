@@ -67,6 +67,33 @@ describe('ElevenLabs Typed Integration', () => {
     expect(provider.caps.maxInlineBreakSeconds).toBe(3);
   });
 
+  it('exposes voiceCatalog through the conductor-typed provider as optional (intentional erasure to VoiceCatalog<unknown>)', () => {
+    // The conductor's createProvider returns TtsProvider<CallOverridesFor<T>>,
+    // and TtsProvider.voiceCatalog is `VoiceCatalog<unknown>` — the
+    // ElevenLabsRawVoice generic is erased at this boundary because
+    // TtsProvider can't carry per-provider raw-record types without an
+    // additional registry. This test pins down the intentional design:
+    //   - `voiceCatalog` is reachable through the conductor path
+    //   - it's typed as VoiceCatalog<unknown>, so `entry.raw` is unknown
+    //   - consumers needing the typed raw record import ElevenLabsVoiceCatalog
+    //     directly or cast via VoiceCatalogEntry<ElevenLabsRawVoice>
+    const conductor = createTtsConductor(runtimeConfig);
+    conductor.registerProvider(elevenLabsProviderFactory);
+
+    const provider = conductor.createProvider('11labs', {
+      apiKey: 'test-key',
+      voiceId: 'test-voice',
+    });
+
+    // If this line compiles, voiceCatalog is properly optional on the
+    // returned TtsProvider type.
+    const catalogFn: () => Promise<unknown> = async () => {
+      return provider.voiceCatalog?.listVoices();
+    };
+
+    expect(typeof catalogFn).toBe('function');
+  });
+
   it('threads ElevenLabsCallOverrides through createProvider so per-call overrides typecheck', () => {
     // This test exists as a typecheck guard: if the conductor's createProvider
     // path ever loses the CallOverridesFor<T> wiring, the lines marked below

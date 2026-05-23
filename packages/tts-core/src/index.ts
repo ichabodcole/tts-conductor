@@ -57,3 +57,8 @@ export type { Segment } from './utils/segmenter';
 export { parseScript } from './utils/segmenter';
 export type { BuildFinalAudioResult } from './utils/stitcher';
 export { buildFinalAudio } from './utils/stitcher';
+export type {
+  VoiceCatalog,
+  VoiceCatalogEntry,
+  VoiceCatalogQuery,
+} from './voice-catalog';

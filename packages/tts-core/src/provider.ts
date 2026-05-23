@@ -1,3 +1,5 @@
+import type { VoiceCatalog } from './voice-catalog';
+
 export interface ProviderCapabilities {
   /** null if provider cannot inline breaks */
   maxInlineBreakSeconds: number | null;
@@ -46,4 +48,12 @@ export interface TtsProvider<TCallOverrides = never> {
   readonly id: string;
   readonly caps: ProviderCapabilities;
   generate(chunk: string, options?: GenerateCallOptions<TCallOverrides>): Promise<GenerationResult>;
+  /**
+   * Optional voice catalog access. Providers that expose a voice-picker concept
+   * (ElevenLabs, Cartesia, Hume, Fish.audio, PlayHT, Azure, Google, Piper)
+   * implement this; providers without (OpenAI's fixed enum, Deepgram's static
+   * model strings, a custom self-hosted server) leave it undefined. Consumers
+   * detect availability via a simple existence check: `if (provider.voiceCatalog)`.
+   */
+  readonly voiceCatalog?: VoiceCatalog;
 }
