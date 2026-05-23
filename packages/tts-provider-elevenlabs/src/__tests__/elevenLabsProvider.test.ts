@@ -4,11 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const convertHandler = vi.hoisted(() => vi.fn());
 const ElevenLabsClientMock = vi.hoisted(() =>
-  vi.fn(() => ({
-    textToSpeech: {
-      convert: convertHandler,
-    },
-  })),
+  // biome-ignore lint/complexity/useArrowFunction: needs to be a regular function so the mock is constructable under Vitest 4 — arrow functions cannot be invoked with `new`.
+  vi.fn(function () {
+    return {
+      textToSpeech: {
+        convert: convertHandler,
+      },
+    };
+  }),
 );
 
 vi.mock('@elevenlabs/elevenlabs-js', () => ({
