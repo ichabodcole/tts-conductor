@@ -7,7 +7,7 @@ Reusable text-to-speech tooling. The workspace currently ships the shared orches
 - **pnpm workspaces** – dependency management across packages.
 - **Turborepo** – orchestrates build, lint, and test tasks in parallel.
 - **TypeScript** – shared compiler configuration via `tsconfig.base.json`.
-- **tsup** – bundles package sources to `dist/` with type declarations.
+- **tsdown** – bundles package sources to `dist/` with type declarations.
 - **ESLint (flat config)** – lint rules applied via `pnpm lint`.
 - **Vitest** – workspace-aware test runner (test suites to be ported next).
 

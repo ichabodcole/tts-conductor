@@ -7,7 +7,7 @@
     "elevenlabs",
     "provider"
   ],
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {

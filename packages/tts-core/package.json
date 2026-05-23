@@ -8,7 +8,7 @@
     "audio",
     "orchestration"
   ],
-  "license": "UNLICENSED",
+  "license": "MIT",
   "type": "module",
   "exports": {
     ".": {
