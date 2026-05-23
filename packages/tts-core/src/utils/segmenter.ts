@@ -43,6 +43,10 @@ export function parseScript(input: string, table: PauseTable, logger?: TtsLogger
     }
   }
 
+  // D4: automatic punctuation/dash fixups across pause boundaries. Two passes
+  // on every text\u2192pause\u2192text triple, no config knobs. Documented in the core
+  // README under "Script parsing behavior." Consumers wanting the raw split
+  // should work with the segments returned here before passing to toChunks.
   for (let i = 1; i < segments.length - 1; i++) {
     const prev = segments[i - 1];
     const current = segments[i];

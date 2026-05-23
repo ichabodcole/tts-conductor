@@ -8,7 +8,7 @@ Reusable text-to-speech tooling. The workspace currently ships the shared orches
 - **Turborepo** – orchestrates build, lint, and test tasks in parallel.
 - **TypeScript** – shared compiler configuration via `tsconfig.base.json`.
 - **tsdown** – bundles package sources to `dist/` with type declarations.
-- **ESLint (flat config)** – lint rules applied via `bun run lint`.
+- **Biome** – formatting and lint via `bun run check` / `bun run lint`.
 - **Vitest** – workspace-aware test runner.
 
 ## Structure

@@ -60,6 +60,11 @@ export function toChunks(
   logger?: TtsLogger,
 ): Chunk[] {
   const INLINE_LIMIT = caps.maxInlineBreakSeconds ?? 0;
+  // D5: SSML `<break>` is the load-bearing fallback for non-SSML engines.
+  // Adapters whose target engine uses a different inline-pause syntax supply
+  // `caps.renderInlineBreak`; this is the ONLY override point in the pipeline.
+  // Don't inline the SSML literal elsewhere — keep this branch the single
+  // source of truth so new adapters can intercept it cleanly.
   const renderInlineBreak =
     caps.renderInlineBreak ?? ((seconds: number) => `<break time="${seconds}s" />`);
   const MAX_CHARS =
