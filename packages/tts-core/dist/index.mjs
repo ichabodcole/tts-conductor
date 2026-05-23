@@ -46,7 +46,7 @@ const DEFAULT_TIMEOUTS = {
 	concat: 45e3,
 	/** Filter-graph concat fallback (slower, re-encodes from scratch). */
 	concatFilterFallback: 6e4,
-	/** Final MP3 encode. */
+	/** Final audio encode (codec determined by the resolved OutputFormat). */
 	finalEncode: 45e3,
 	/** Outer wrap around buildFinalAudio inside the orchestration. */
 	stitch: 45e3
@@ -67,15 +67,102 @@ const INTERMEDIATE_AUDIO = {
 	codec: "pcm_s16le"
 };
 /**
-* Default final-output format. Currently hardcoded at the stitcher; a future
-* per-call output config will let consumers pick Opus/FLAC/variable bitrates.
+* Preset output formats covering the common consumer cases. Use one directly:
+*
+*   conductor.generateFull(text, provider, undefined, { output: OUTPUT_FORMATS.OPUS_64 });
+*
+* Or spread + override for variants (keep codec/container/mimeType coherent):
+*
+*   { output: { ...OUTPUT_FORMATS.MP3_192, channels: 2 } }   // stereo MP3
+*   { output: { ...OUTPUT_FORMATS.OPUS_64, bitrate: '96k' } } // higher-quality Opus
+*
+* Notes on the picks:
+* - Opus presets use 48kHz because Opus is designed around 48kHz internally
+*   (lower rates get upsampled, wasting bits).
+* - FLAC and WAV presets omit `bitrate` because they're lossless; supplying
+*   a bitrate to ffmpeg for these codecs is silently ignored.
+* - Default sample rate is 44.1kHz / mono — matches ElevenLabs' standard
+*   MP3 output and the intermediate-audio pipeline.
 */
-const DEFAULT_OUTPUT_FORMAT = {
-	codec: "libmp3lame",
-	bitrate: "192k",
-	sampleRateHz: 44100,
-	channels: 1
+const OUTPUT_FORMATS = {
+	/** Spoken-word small-file MP3 — ~half the size of MP3_128 with little quality loss for narration. */
+	MP3_64: {
+		codec: "libmp3lame",
+		bitrate: "64k",
+		sampleRateHz: 44100,
+		channels: 1,
+		container: "mp3",
+		mimeType: "audio/mpeg"
+	},
+	MP3_128: {
+		codec: "libmp3lame",
+		bitrate: "128k",
+		sampleRateHz: 44100,
+		channels: 1,
+		container: "mp3",
+		mimeType: "audio/mpeg"
+	},
+	MP3_192: {
+		codec: "libmp3lame",
+		bitrate: "192k",
+		sampleRateHz: 44100,
+		channels: 1,
+		container: "mp3",
+		mimeType: "audio/mpeg"
+	},
+	MP3_320: {
+		codec: "libmp3lame",
+		bitrate: "320k",
+		sampleRateHz: 44100,
+		channels: 1,
+		container: "mp3",
+		mimeType: "audio/mpeg"
+	},
+	OPUS_64: {
+		codec: "libopus",
+		bitrate: "64k",
+		sampleRateHz: 48e3,
+		channels: 1,
+		container: "opus",
+		mimeType: "audio/ogg; codecs=opus"
+	},
+	/**
+	* Stereo Opus preset. Note: the intermediate pipeline is always 44.1kHz
+	* mono pcm_s16le (required for ffmpeg concat-demuxer reliability), so
+	* `channels: 2` here duplicates the mono signal across both channels —
+	* the output file is technically stereo but carries no spatial information.
+	* Real stereo TTS would require a different intermediate pipeline.
+	*/
+	OPUS_128_STEREO: {
+		codec: "libopus",
+		bitrate: "128k",
+		sampleRateHz: 48e3,
+		channels: 2,
+		container: "opus",
+		mimeType: "audio/ogg; codecs=opus"
+	},
+	FLAC: {
+		codec: "flac",
+		sampleRateHz: 44100,
+		channels: 1,
+		container: "flac",
+		mimeType: "audio/flac"
+	},
+	WAV: {
+		codec: "pcm_s16le",
+		sampleRateHz: 44100,
+		channels: 1,
+		container: "wav",
+		mimeType: "audio/wav"
+	}
 };
+/**
+* Default final-output format. MP3 at 192kbps / 44.1kHz / mono — matches what
+* the library has historically produced. Consumers can pick a different preset
+* from {@link OUTPUT_FORMATS} or compose a custom {@link OutputFormat} via
+* {@link BuildAudioOptions.output}.
+*/
+const DEFAULT_OUTPUT_FORMAT = OUTPUT_FORMATS.MP3_192;
 //#endregion
 //#region src/errors.ts
 /**
@@ -544,11 +631,13 @@ async function concatParts(fileList, outPath, ffmpegConfig, logger, signal, conc
 		}
 	}
 }
-async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now()}.mp3`, options) {
+async function buildFinalAudio(config, chunks, audio, fileName, options) {
 	if (chunks.length !== audio.length) throw new Error("chunks and audio arrays must be equal length");
 	const logger = config.logger;
 	const ffmpegConfig = config.ffmpeg;
 	const signal = options?.signal;
+	const outputFormat = options?.output ?? DEFAULT_OUTPUT_FORMAT;
+	const resolvedFileName = fileName ?? `tts_${Date.now()}.${outputFormat.container}`;
 	const timeouts = {
 		...DEFAULT_TIMEOUTS,
 		...config.timeouts ?? {}
@@ -592,27 +681,26 @@ async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now
 		const outWavPath = path.join(tmp, `tts_concat_${Date.now()}.wav`);
 		tempFilesToCleanup.push(outWavPath);
 		await concatParts(partFiles, outWavPath, ffmpegConfig, logger, signal, timeouts.concat, timeouts.concatFilterFallback);
-		const outPath = path.join(tmp, fileName);
+		const outPath = path.join(tmp, resolvedFileName);
 		tempFilesToCleanup.push(outPath);
-		await execa(ffmpegBin, [
+		const finalEncodeArgs = [
 			"-i",
 			outWavPath,
 			"-c:a",
-			DEFAULT_OUTPUT_FORMAT.codec,
+			outputFormat.codec,
 			"-ar",
-			String(DEFAULT_OUTPUT_FORMAT.sampleRateHz),
+			String(outputFormat.sampleRateHz),
 			"-ac",
-			String(DEFAULT_OUTPUT_FORMAT.channels),
-			"-b:a",
-			DEFAULT_OUTPUT_FORMAT.bitrate,
-			"-y",
-			outPath
-		], {
+			String(outputFormat.channels)
+		];
+		if (outputFormat.bitrate) finalEncodeArgs.push("-b:a", outputFormat.bitrate);
+		finalEncodeArgs.push("-y", outPath);
+		await execa(ffmpegBin, finalEncodeArgs, {
 			timeout: timeouts.finalEncode,
 			cancelSignal: signal
 		});
 		await saveDebugFromFile(config, outPath, {
-			fileName: `final_${fileName}`,
+			fileName: `final_${resolvedFileName}`,
 			jobId: options?.debugJobId,
 			stage: "final"
 		});
@@ -624,7 +712,7 @@ async function buildFinalAudio(config, chunks, audio, fileName = `tts_${Date.now
 		const result = {
 			audio: buf,
 			base64Data: buf.toString("base64"),
-			mimeType: "audio/mpeg",
+			mimeType: outputFormat.mimeType,
 			size: buf.length,
 			duration: durationSec
 		};
@@ -753,6 +841,6 @@ function createTtsConductor(config) {
 	return new TtsConductor(config);
 }
 //#endregion
-export { DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS, ProcessStage, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, TtsQuotaExceededError, TtsRateLimitError, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
+export { DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS, OUTPUT_FORMATS, ProcessStage, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, TtsQuotaExceededError, TtsRateLimitError, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
 
 //# sourceMappingURL=index.mjs.map

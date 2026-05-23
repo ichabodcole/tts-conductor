@@ -32,7 +32,7 @@ export const DEFAULT_TIMEOUTS = {
   concat: 45_000,
   /** Filter-graph concat fallback (slower, re-encodes from scratch). */
   concatFilterFallback: 60_000,
-  /** Final MP3 encode. */
+  /** Final audio encode (codec determined by the resolved OutputFormat). */
   finalEncode: 45_000,
   /** Outer wrap around buildFinalAudio inside the orchestration. */
   stitch: 45_000,
@@ -55,15 +55,137 @@ export const INTERMEDIATE_AUDIO = {
 } as const;
 
 /**
- * Default final-output format. Currently hardcoded at the stitcher; a future
- * per-call output config will let consumers pick Opus/FLAC/variable bitrates.
+ * Shape of a final-output format. Consumers either pick a preset from
+ * {@link OUTPUT_FORMATS} or compose their own. The full object is required —
+ * we deliberately do NOT accept `Partial<OutputFormat>` because mismatched
+ * fields (e.g., Opus codec with MP3 container) silently produce wrong files.
+ *
+ * For custom-but-similar variants, spread a preset and override specific
+ * fields, keeping the codec / container / mimeType triad coherent:
+ *
+ *   const customOpus = { ...OUTPUT_FORMATS.OPUS_64, bitrate: '96k' };
+ *
+ * Fields:
+ * - `codec` — ffmpeg codec name passed to `-c:a` (e.g., `libmp3lame`,
+ *   `libopus`, `flac`, `pcm_s16le`).
+ * - `bitrate` — bitrate string passed to `-b:a` for lossy codecs (`'128k'`,
+ *   `'192k'`, `'320k'`). Omit for lossless codecs (FLAC, PCM) — the field
+ *   should be undefined in those presets.
+ * - `sampleRateHz` — sample rate in Hz passed to `-ar` (44100, 48000, etc.).
+ * - `channels` — channel count passed to `-ac` (1 = mono, 2 = stereo).
+ * - `container` — file extension (without dot) and ffmpeg container name.
+ *   Determines the output filename suffix.
+ * - `mimeType` — MIME type surfaced on `BuildFinalAudioResult.mimeType`.
  */
-export const DEFAULT_OUTPUT_FORMAT = {
-  codec: 'libmp3lame',
-  bitrate: '192k',
-  sampleRateHz: 44100,
-  channels: 1,
-} as const;
+export interface OutputFormat {
+  codec: string;
+  bitrate?: string;
+  sampleRateHz: number;
+  channels: number;
+  container: string;
+  mimeType: string;
+}
+
+/**
+ * Preset output formats covering the common consumer cases. Use one directly:
+ *
+ *   conductor.generateFull(text, provider, undefined, { output: OUTPUT_FORMATS.OPUS_64 });
+ *
+ * Or spread + override for variants (keep codec/container/mimeType coherent):
+ *
+ *   { output: { ...OUTPUT_FORMATS.MP3_192, channels: 2 } }   // stereo MP3
+ *   { output: { ...OUTPUT_FORMATS.OPUS_64, bitrate: '96k' } } // higher-quality Opus
+ *
+ * Notes on the picks:
+ * - Opus presets use 48kHz because Opus is designed around 48kHz internally
+ *   (lower rates get upsampled, wasting bits).
+ * - FLAC and WAV presets omit `bitrate` because they're lossless; supplying
+ *   a bitrate to ffmpeg for these codecs is silently ignored.
+ * - Default sample rate is 44.1kHz / mono — matches ElevenLabs' standard
+ *   MP3 output and the intermediate-audio pipeline.
+ */
+export const OUTPUT_FORMATS = {
+  /** Spoken-word small-file MP3 — ~half the size of MP3_128 with little quality loss for narration. */
+  MP3_64: {
+    codec: 'libmp3lame',
+    bitrate: '64k',
+    sampleRateHz: 44100,
+    channels: 1,
+    container: 'mp3',
+    mimeType: 'audio/mpeg',
+  },
+  MP3_128: {
+    codec: 'libmp3lame',
+    bitrate: '128k',
+    sampleRateHz: 44100,
+    channels: 1,
+    container: 'mp3',
+    mimeType: 'audio/mpeg',
+  },
+  MP3_192: {
+    codec: 'libmp3lame',
+    bitrate: '192k',
+    sampleRateHz: 44100,
+    channels: 1,
+    container: 'mp3',
+    mimeType: 'audio/mpeg',
+  },
+  MP3_320: {
+    codec: 'libmp3lame',
+    bitrate: '320k',
+    sampleRateHz: 44100,
+    channels: 1,
+    container: 'mp3',
+    mimeType: 'audio/mpeg',
+  },
+  OPUS_64: {
+    codec: 'libopus',
+    bitrate: '64k',
+    sampleRateHz: 48000,
+    channels: 1,
+    container: 'opus',
+    // `audio/opus` (RFC 7587) is the raw RTP bitstream MIME; ffmpeg's `.opus`
+    // files are Ogg-wrapped and the IANA-correct type is `audio/ogg; codecs=opus`.
+    mimeType: 'audio/ogg; codecs=opus',
+  },
+  /**
+   * Stereo Opus preset. Note: the intermediate pipeline is always 44.1kHz
+   * mono pcm_s16le (required for ffmpeg concat-demuxer reliability), so
+   * `channels: 2` here duplicates the mono signal across both channels —
+   * the output file is technically stereo but carries no spatial information.
+   * Real stereo TTS would require a different intermediate pipeline.
+   */
+  OPUS_128_STEREO: {
+    codec: 'libopus',
+    bitrate: '128k',
+    sampleRateHz: 48000,
+    channels: 2,
+    container: 'opus',
+    mimeType: 'audio/ogg; codecs=opus',
+  },
+  FLAC: {
+    codec: 'flac',
+    sampleRateHz: 44100,
+    channels: 1,
+    container: 'flac',
+    mimeType: 'audio/flac',
+  },
+  WAV: {
+    codec: 'pcm_s16le',
+    sampleRateHz: 44100,
+    channels: 1,
+    container: 'wav',
+    mimeType: 'audio/wav',
+  },
+} as const satisfies Record<string, OutputFormat>;
+
+/**
+ * Default final-output format. MP3 at 192kbps / 44.1kHz / mono — matches what
+ * the library has historically produced. Consumers can pick a different preset
+ * from {@link OUTPUT_FORMATS} or compose a custom {@link OutputFormat} via
+ * {@link BuildAudioOptions.output}.
+ */
+export const DEFAULT_OUTPUT_FORMAT: OutputFormat = OUTPUT_FORMATS.MP3_192;
 
 /**
  * SSML wrapper overhead reserved when computing the per-chunk character budget.

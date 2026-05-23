@@ -163,6 +163,119 @@ describe('buildFinalAudio', () => {
     expect(args).toContain('-ac');
   });
 
+  describe('per-call output format (A7)', () => {
+    it('uses DEFAULT_OUTPUT_FORMAT (MP3 192k mono) when options.output is omitted', async () => {
+      const { DEFAULT_OUTPUT_FORMAT } = await import('../defaults');
+      const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+      const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+      const result = await buildFinalAudio(config, chunks, audio, 'test.mp3');
+
+      expect(result.mimeType).toBe('audio/mpeg');
+      const calls = getExecaMock().mock.calls;
+      const finalArgs = (calls[calls.length - 1]?.[1] as string[]) ?? [];
+      // Codec, sample rate, channels, bitrate all match the default.
+      expect(finalArgs).toContain(DEFAULT_OUTPUT_FORMAT.codec);
+      expect(finalArgs).toContain(String(DEFAULT_OUTPUT_FORMAT.sampleRateHz));
+      expect(finalArgs).toContain(DEFAULT_OUTPUT_FORMAT.bitrate);
+    });
+
+    it('uses an Opus preset when consumer passes OUTPUT_FORMATS.OPUS_64', async () => {
+      const { OUTPUT_FORMATS } = await import('../defaults');
+      const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+      const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+      const result = await buildFinalAudio(config, chunks, audio, undefined, {
+        output: OUTPUT_FORMATS.OPUS_64,
+      });
+
+      // mimeType + final-encode args reflect Opus (Ogg-wrapped), not MP3.
+      expect(result.mimeType).toBe('audio/ogg; codecs=opus');
+      const calls = getExecaMock().mock.calls;
+      const finalArgs = (calls[calls.length - 1]?.[1] as string[]) ?? [];
+      expect(finalArgs).toContain('libopus');
+      expect(finalArgs).toContain('48000');
+      expect(finalArgs).toContain('64k');
+      // Output file extension picked up from the container.
+      const outputPath = finalArgs[finalArgs.length - 1] ?? '';
+      expect(outputPath).toMatch(/\.opus$/);
+    });
+
+    it('omits -b:a for lossless codecs (FLAC) that have no bitrate', async () => {
+      const { OUTPUT_FORMATS } = await import('../defaults');
+      const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+      const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+      await buildFinalAudio(config, chunks, audio, undefined, {
+        output: OUTPUT_FORMATS.FLAC,
+      });
+
+      const calls = getExecaMock().mock.calls;
+      const finalArgs = (calls[calls.length - 1]?.[1] as string[]) ?? [];
+      expect(finalArgs).toContain('flac');
+      // FLAC is lossless; bitrate is omitted from the preset and should NOT
+      // appear in the args (ffmpeg silently ignores -b:a for FLAC, but
+      // emitting it would be misleading).
+      expect(finalArgs).not.toContain('-b:a');
+    });
+
+    it('respects spread-and-override pattern (custom bitrate on a preset)', async () => {
+      const { OUTPUT_FORMATS } = await import('../defaults');
+      const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+      const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+      const customMp3 = { ...OUTPUT_FORMATS.MP3_192, bitrate: '320k', channels: 2 };
+      const result = await buildFinalAudio(config, chunks, audio, undefined, {
+        output: customMp3,
+      });
+
+      expect(result.mimeType).toBe('audio/mpeg');
+      const calls = getExecaMock().mock.calls;
+      const finalArgs = (calls[calls.length - 1]?.[1] as string[]) ?? [];
+      expect(finalArgs).toContain('320k');
+      // -ac 2 should appear consecutively
+      const acIdx = finalArgs.indexOf('-ac');
+      expect(acIdx).toBeGreaterThanOrEqual(0);
+      expect(finalArgs[acIdx + 1]).toBe('2');
+    });
+
+    it('uses the format container as the default filename extension', async () => {
+      const { OUTPUT_FORMATS } = await import('../defaults');
+      const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+      const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+      // Omit fileName arg entirely — should pick up `.flac` from the format.
+      await buildFinalAudio(config, chunks, audio, undefined, {
+        output: OUTPUT_FORMATS.FLAC,
+      });
+
+      const calls = getExecaMock().mock.calls;
+      const finalArgs = (calls[calls.length - 1]?.[1] as string[]) ?? [];
+      const outputPath = finalArgs[finalArgs.length - 1] ?? '';
+      expect(outputPath).toMatch(/\.flac$/);
+    });
+
+    it('honors consumer-supplied fileName verbatim even when output format would imply a different extension', async () => {
+      const { OUTPUT_FORMATS } = await import('../defaults');
+      const chunks: Chunk[] = [{ ssml: 'Hello', postPause: 0 }];
+      const audio = [{ buffer: Buffer.from('hello'), duration: 1 }];
+
+      // Consumer requests Opus output but supplies an .mp3 filename. The
+      // library does NOT override — consumer is responsible for matching
+      // their filename to the format. Documented as a foot-gun in the
+      // OutputFormat / BuildAudioOptions JSDoc.
+      await buildFinalAudio(config, chunks, audio, 'custom-name.mp3', {
+        output: OUTPUT_FORMATS.OPUS_64,
+      });
+
+      const calls = getExecaMock().mock.calls;
+      const finalArgs = (calls[calls.length - 1]?.[1] as string[]) ?? [];
+      const outputPath = finalArgs[finalArgs.length - 1] ?? '';
+      // Consumer's name wins — extension is .mp3 even though the codec is Opus.
+      expect(outputPath).toMatch(/custom-name\.mp3$/);
+    });
+  });
+
   it('reuses cached silence files for identical pause durations', async () => {
     const chunks: Chunk[] = [
       { ssml: 'Hello', postPause: 2 },

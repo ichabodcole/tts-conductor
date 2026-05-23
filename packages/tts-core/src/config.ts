@@ -1,3 +1,5 @@
+import type { OutputFormat } from './defaults';
+
 export enum ProcessStage {
   /** Individual audio chunks from providers */
   Raw = 'raw',
@@ -49,7 +51,7 @@ export interface TtsTimeouts {
   concat?: number;
   /** Filter-graph concat fallback (slower, re-encodes from scratch). */
   concatFilterFallback?: number;
-  /** Final MP3 encode. */
+  /** Final audio encode (codec determined by the resolved OutputFormat). */
   finalEncode?: number;
   /** Outer wrap around the entire `buildFinalAudio` orchestration. */
   stitch?: number;
@@ -103,4 +105,17 @@ export interface BuildAudioOptions {
    * cancellation flows.
    */
   signal?: AbortSignal;
+  /**
+   * Per-call final-output format. Pick a preset from `OUTPUT_FORMATS` or
+   * compose a custom `OutputFormat`. When omitted, falls back to
+   * `DEFAULT_OUTPUT_FORMAT` (MP3 192kbps / 44.1kHz / mono — matches what the
+   * library has historically produced).
+   *
+   * The full object is required — `Partial<OutputFormat>` is not accepted
+   * because mismatched fields (e.g., Opus codec with MP3 container) silently
+   * produce wrong files. To override only some fields of a preset, spread it:
+   *
+   *   { output: { ...OUTPUT_FORMATS.MP3_192, bitrate: '320k' } }
+   */
+  output?: OutputFormat;
 }

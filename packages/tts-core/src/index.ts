@@ -9,7 +9,13 @@ export type {
   TtsTimeouts,
 } from './config';
 export { ProcessStage } from './config';
-export { DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS } from './defaults';
+export type { OutputFormat } from './defaults';
+export {
+  DEFAULT_OUTPUT_FORMAT,
+  DEFAULT_PAUSE_TABLE,
+  DEFAULT_TIMEOUTS,
+  OUTPUT_FORMATS,
+} from './defaults';
 export {
   TtsAuthenticationError,
   TtsError,

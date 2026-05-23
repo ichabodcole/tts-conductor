@@ -216,7 +216,7 @@ export async function buildFinalAudio(
   config: TtsRuntimeConfig,
   chunks: Chunk[],
   audio: AudioPart[],
-  fileName = `tts_${Date.now()}.mp3`,
+  fileName?: string,
   options?: BuildAudioOptions,
 ): Promise<BuildFinalAudioResult> {
   if (chunks.length !== audio.length) {
@@ -226,6 +226,14 @@ export async function buildFinalAudio(
   const logger = config.logger;
   const ffmpegConfig = config.ffmpeg;
   const signal = options?.signal;
+  // A7: resolve the output format once. Consumers either pass a full
+  // OutputFormat preset (e.g., OUTPUT_FORMATS.OPUS_64) or compose a custom
+  // one. No Partial-merge — would silently produce mismatched files.
+  const outputFormat = options?.output ?? DEFAULT_OUTPUT_FORMAT;
+  // Default filename includes the right container extension so debug sinks
+  // and consumer disk-writes get the right suffix. Consumer-supplied
+  // fileName is honored verbatim (consumer's responsibility to match).
+  const resolvedFileName = fileName ?? `tts_${Date.now()}.${outputFormat.container}`;
   // Resolve timeouts once at the orchestration boundary so all helpers
   // receive primitive numbers, not the optional config shape.
   const timeouts = { ...DEFAULT_TIMEOUTS, ...(config.timeouts ?? {}) };
@@ -292,30 +300,35 @@ export async function buildFinalAudio(
       timeouts.concatFilterFallback,
     );
 
-    const outPath = path.join(tmp, fileName);
+    const outPath = path.join(tmp, resolvedFileName);
     tempFilesToCleanup.push(outPath);
 
-    await execa(
-      ffmpegBin,
-      [
-        '-i',
-        outWavPath,
-        '-c:a',
-        DEFAULT_OUTPUT_FORMAT.codec,
-        '-ar',
-        String(DEFAULT_OUTPUT_FORMAT.sampleRateHz),
-        '-ac',
-        String(DEFAULT_OUTPUT_FORMAT.channels),
-        '-b:a',
-        DEFAULT_OUTPUT_FORMAT.bitrate,
-        '-y',
-        outPath,
-      ],
-      { timeout: timeouts.finalEncode, cancelSignal: signal },
-    );
+    // Build the final-encode args from the resolved OutputFormat. `-b:a` is
+    // only emitted for lossy codecs that declared a bitrate; lossless codecs
+    // (FLAC, PCM) omit the field intentionally — supplying it would be
+    // silently ignored by ffmpeg.
+    const finalEncodeArgs = [
+      '-i',
+      outWavPath,
+      '-c:a',
+      outputFormat.codec,
+      '-ar',
+      String(outputFormat.sampleRateHz),
+      '-ac',
+      String(outputFormat.channels),
+    ];
+    if (outputFormat.bitrate) {
+      finalEncodeArgs.push('-b:a', outputFormat.bitrate);
+    }
+    finalEncodeArgs.push('-y', outPath);
+
+    await execa(ffmpegBin, finalEncodeArgs, {
+      timeout: timeouts.finalEncode,
+      cancelSignal: signal,
+    });
 
     await saveDebugFromFile(config, outPath, {
-      fileName: `final_${fileName}`,
+      fileName: `final_${resolvedFileName}`,
       jobId: options?.debugJobId,
       stage: ProcessStage.Final,
     });
@@ -330,7 +343,7 @@ export async function buildFinalAudio(
     const result: BuildFinalAudioResult = {
       audio: buf,
       base64Data: buf.toString('base64'),
-      mimeType: 'audio/mpeg',
+      mimeType: outputFormat.mimeType,
       size: buf.length,
       duration: durationSec,
     };

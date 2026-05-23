@@ -1,3 +1,166 @@
+//#region src/utils/pause.d.ts
+type PauseTable = Record<string, number>;
+/**
+ * Parse pause duration from various pause formats
+ * Supports patterns like:
+ *   [PAUSE:LABEL]
+ *   [PAUSE:LABEL:Nx]
+ *   [PAUSE:LABEL:Ns]
+ *   [PAUSE:Ns]
+ */
+declare function parsePauseDuration(pauseMatch: string, table: PauseTable): number;
+declare function isValidPauseFormat(input: string): boolean;
+declare function extractPauseMarkers(text: string): string[];
+//#endregion
+//#region src/defaults.d.ts
+declare const DEFAULT_PAUSE_TABLE: PauseTable;
+/**
+ * Default timeouts (milliseconds) for each waited operation in the orchestration
+ * pipeline. Consumers can override any subset of these via
+ * {@link TtsRuntimeConfig.timeouts}; whatever they don't supply falls back here.
+ *
+ * Values reflect what the library historically hardcoded and have proven
+ * reasonable in production for ElevenLabs at typical chunk sizes (~1200 chars).
+ * Long segments, slow upstream days, or larger chunk budgets may want higher
+ * values — that's exactly what the override surface is for.
+ */
+declare const DEFAULT_TIMEOUTS: {
+  /** Per-chunk provider.generate() wrapping timeout (entire upstream call). */readonly generate: 60000; /** Per-chunk ffmpeg transcode (MP3 → intermediate WAV). */
+  readonly transcode: 30000; /** Silence-WAV generation (cached after first build per duration). */
+  readonly silenceGen: 30000; /** Concat-demuxer concatenation (fast path). */
+  readonly concat: 45000; /** Filter-graph concat fallback (slower, re-encodes from scratch). */
+  readonly concatFilterFallback: 60000; /** Final audio encode (codec determined by the resolved OutputFormat). */
+  readonly finalEncode: 45000; /** Outer wrap around buildFinalAudio inside the orchestration. */
+  readonly stitch: 45000;
+};
+/**
+ * Shape of a final-output format. Consumers either pick a preset from
+ * {@link OUTPUT_FORMATS} or compose their own. The full object is required —
+ * we deliberately do NOT accept `Partial<OutputFormat>` because mismatched
+ * fields (e.g., Opus codec with MP3 container) silently produce wrong files.
+ *
+ * For custom-but-similar variants, spread a preset and override specific
+ * fields, keeping the codec / container / mimeType triad coherent:
+ *
+ *   const customOpus = { ...OUTPUT_FORMATS.OPUS_64, bitrate: '96k' };
+ *
+ * Fields:
+ * - `codec` — ffmpeg codec name passed to `-c:a` (e.g., `libmp3lame`,
+ *   `libopus`, `flac`, `pcm_s16le`).
+ * - `bitrate` — bitrate string passed to `-b:a` for lossy codecs (`'128k'`,
+ *   `'192k'`, `'320k'`). Omit for lossless codecs (FLAC, PCM) — the field
+ *   should be undefined in those presets.
+ * - `sampleRateHz` — sample rate in Hz passed to `-ar` (44100, 48000, etc.).
+ * - `channels` — channel count passed to `-ac` (1 = mono, 2 = stereo).
+ * - `container` — file extension (without dot) and ffmpeg container name.
+ *   Determines the output filename suffix.
+ * - `mimeType` — MIME type surfaced on `BuildFinalAudioResult.mimeType`.
+ */
+interface OutputFormat {
+  codec: string;
+  bitrate?: string;
+  sampleRateHz: number;
+  channels: number;
+  container: string;
+  mimeType: string;
+}
+/**
+ * Preset output formats covering the common consumer cases. Use one directly:
+ *
+ *   conductor.generateFull(text, provider, undefined, { output: OUTPUT_FORMATS.OPUS_64 });
+ *
+ * Or spread + override for variants (keep codec/container/mimeType coherent):
+ *
+ *   { output: { ...OUTPUT_FORMATS.MP3_192, channels: 2 } }   // stereo MP3
+ *   { output: { ...OUTPUT_FORMATS.OPUS_64, bitrate: '96k' } } // higher-quality Opus
+ *
+ * Notes on the picks:
+ * - Opus presets use 48kHz because Opus is designed around 48kHz internally
+ *   (lower rates get upsampled, wasting bits).
+ * - FLAC and WAV presets omit `bitrate` because they're lossless; supplying
+ *   a bitrate to ffmpeg for these codecs is silently ignored.
+ * - Default sample rate is 44.1kHz / mono — matches ElevenLabs' standard
+ *   MP3 output and the intermediate-audio pipeline.
+ */
+declare const OUTPUT_FORMATS: {
+  /** Spoken-word small-file MP3 — ~half the size of MP3_128 with little quality loss for narration. */readonly MP3_64: {
+    readonly codec: "libmp3lame";
+    readonly bitrate: "64k";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "mp3";
+    readonly mimeType: "audio/mpeg";
+  };
+  readonly MP3_128: {
+    readonly codec: "libmp3lame";
+    readonly bitrate: "128k";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "mp3";
+    readonly mimeType: "audio/mpeg";
+  };
+  readonly MP3_192: {
+    readonly codec: "libmp3lame";
+    readonly bitrate: "192k";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "mp3";
+    readonly mimeType: "audio/mpeg";
+  };
+  readonly MP3_320: {
+    readonly codec: "libmp3lame";
+    readonly bitrate: "320k";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "mp3";
+    readonly mimeType: "audio/mpeg";
+  };
+  readonly OPUS_64: {
+    readonly codec: "libopus";
+    readonly bitrate: "64k";
+    readonly sampleRateHz: 48000;
+    readonly channels: 1;
+    readonly container: "opus";
+    readonly mimeType: "audio/ogg; codecs=opus";
+  };
+  /**
+   * Stereo Opus preset. Note: the intermediate pipeline is always 44.1kHz
+   * mono pcm_s16le (required for ffmpeg concat-demuxer reliability), so
+   * `channels: 2` here duplicates the mono signal across both channels —
+   * the output file is technically stereo but carries no spatial information.
+   * Real stereo TTS would require a different intermediate pipeline.
+   */
+  readonly OPUS_128_STEREO: {
+    readonly codec: "libopus";
+    readonly bitrate: "128k";
+    readonly sampleRateHz: 48000;
+    readonly channels: 2;
+    readonly container: "opus";
+    readonly mimeType: "audio/ogg; codecs=opus";
+  };
+  readonly FLAC: {
+    readonly codec: "flac";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "flac";
+    readonly mimeType: "audio/flac";
+  };
+  readonly WAV: {
+    readonly codec: "pcm_s16le";
+    readonly sampleRateHz: 44100;
+    readonly channels: 1;
+    readonly container: "wav";
+    readonly mimeType: "audio/wav";
+  };
+};
+/**
+ * Default final-output format. MP3 at 192kbps / 44.1kHz / mono — matches what
+ * the library has historically produced. Consumers can pick a different preset
+ * from {@link OUTPUT_FORMATS} or compose a custom {@link OutputFormat} via
+ * {@link BuildAudioOptions.output}.
+ */
+declare const DEFAULT_OUTPUT_FORMAT: OutputFormat;
+//#endregion
 //#region src/config.d.ts
 declare enum ProcessStage {
   /** Individual audio chunks from providers */
@@ -45,7 +208,7 @@ interface TtsTimeouts {
   concat?: number;
   /** Filter-graph concat fallback (slower, re-encodes from scratch). */
   concatFilterFallback?: number;
-  /** Final MP3 encode. */
+  /** Final audio encode (codec determined by the resolved OutputFormat). */
   finalEncode?: number;
   /** Outer wrap around the entire `buildFinalAudio` orchestration. */
   stitch?: number;
@@ -97,6 +260,19 @@ interface BuildAudioOptions {
    * cancellation flows.
    */
   signal?: AbortSignal;
+  /**
+   * Per-call final-output format. Pick a preset from `OUTPUT_FORMATS` or
+   * compose a custom `OutputFormat`. When omitted, falls back to
+   * `DEFAULT_OUTPUT_FORMAT` (MP3 192kbps / 44.1kHz / mono — matches what the
+   * library has historically produced).
+   *
+   * The full object is required — `Partial<OutputFormat>` is not accepted
+   * because mismatched fields (e.g., Opus codec with MP3 container) silently
+   * produce wrong files. To override only some fields of a preset, spread it:
+   *
+   *   { output: { ...OUTPUT_FORMATS.MP3_192, bitrate: '320k' } }
+   */
+  output?: OutputFormat;
 }
 //#endregion
 //#region src/provider.d.ts
@@ -217,20 +393,6 @@ interface TtsProviderFactory<T extends RegisteredProviderIds, TCallOverrides = n
   create: (ctx: TtsProviderContext, options: ProviderOptionsFor<T>) => TtsProvider<TCallOverrides>;
 }
 //#endregion
-//#region src/utils/pause.d.ts
-type PauseTable = Record<string, number>;
-/**
- * Parse pause duration from various pause formats
- * Supports patterns like:
- *   [PAUSE:LABEL]
- *   [PAUSE:LABEL:Nx]
- *   [PAUSE:LABEL:Ns]
- *   [PAUSE:Ns]
- */
-declare function parsePauseDuration(pauseMatch: string, table: PauseTable): number;
-declare function isValidPauseFormat(input: string): boolean;
-declare function extractPauseMarkers(text: string): string[];
-//#endregion
 //#region src/utils/segmenter.d.ts
 type Segment = {
   kind: 'text';
@@ -292,38 +454,6 @@ declare class TtsConductor {
   generateFull(rawText: string, provider: TtsProvider, onProgress?: (percent: number) => void, options?: BuildAudioOptions): Promise<BuildFinalAudioResult>;
 }
 declare function createTtsConductor(config: TtsRuntimeConfig): TtsConductor;
-//#endregion
-//#region src/defaults.d.ts
-declare const DEFAULT_PAUSE_TABLE: PauseTable;
-/**
- * Default timeouts (milliseconds) for each waited operation in the orchestration
- * pipeline. Consumers can override any subset of these via
- * {@link TtsRuntimeConfig.timeouts}; whatever they don't supply falls back here.
- *
- * Values reflect what the library historically hardcoded and have proven
- * reasonable in production for ElevenLabs at typical chunk sizes (~1200 chars).
- * Long segments, slow upstream days, or larger chunk budgets may want higher
- * values — that's exactly what the override surface is for.
- */
-declare const DEFAULT_TIMEOUTS: {
-  /** Per-chunk provider.generate() wrapping timeout (entire upstream call). */readonly generate: 60000; /** Per-chunk ffmpeg transcode (MP3 → intermediate WAV). */
-  readonly transcode: 30000; /** Silence-WAV generation (cached after first build per duration). */
-  readonly silenceGen: 30000; /** Concat-demuxer concatenation (fast path). */
-  readonly concat: 45000; /** Filter-graph concat fallback (slower, re-encodes from scratch). */
-  readonly concatFilterFallback: 60000; /** Final MP3 encode. */
-  readonly finalEncode: 45000; /** Outer wrap around buildFinalAudio inside the orchestration. */
-  readonly stitch: 45000;
-};
-/**
- * Default final-output format. Currently hardcoded at the stitcher; a future
- * per-call output config will let consumers pick Opus/FLAC/variable bitrates.
- */
-declare const DEFAULT_OUTPUT_FORMAT: {
-  readonly codec: "libmp3lame";
-  readonly bitrate: "192k";
-  readonly sampleRateHz: 44100;
-  readonly channels: 1;
-};
 //#endregion
 //#region src/errors.d.ts
 /**
@@ -421,5 +551,5 @@ declare function ttsGenerateFull(rawText: string, provider: TtsProvider, config:
 declare function getAudioDuration(audioBuffer: Buffer, ffmpegConfig?: FfmpegConfig, logger?: TtsLogger, signal?: AbortSignal): Promise<number>;
 declare function estimateAudioDuration(audioBuffer: Buffer, bitrate?: number): number;
 //#endregion
-export { type BuildAudioOptions, type BuildFinalAudioResult, type CallOverridesFor, DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerateCallOptions, type GenerationResult, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, type TtsLogger, type TtsProvider, type TtsProviderCallOverridesRegistry, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, TtsQuotaExceededError, TtsRateLimitError, type TtsRuntimeConfig, type TtsTimeouts, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
+export { type BuildAudioOptions, type BuildFinalAudioResult, type CallOverridesFor, DEFAULT_OUTPUT_FORMAT, DEFAULT_PAUSE_TABLE, DEFAULT_TIMEOUTS, type DebugMeta, type DebugSink, type FfmpegConfig, type GenerateCallOptions, type GenerationResult, OUTPUT_FORMATS, type OutputFormat, type PauseTable, ProcessStage, type ProviderCapabilities, type ProviderOptionsFor, type RegisteredProviderIds, type Segment, TtsAuthenticationError, TtsConductor, TtsError, TtsInvalidInputError, type TtsLogger, type TtsProvider, type TtsProviderCallOverridesRegistry, type TtsProviderContext, type TtsProviderFactory, type TtsProviderRegistry, TtsQuotaExceededError, TtsRateLimitError, type TtsRuntimeConfig, type TtsTimeouts, TtsTransientError, buildFinalAudio, createTtsConductor, estimateAudioDuration, extractPauseMarkers, getAudioDuration, isValidPauseFormat, parsePauseDuration, parseScript, toChunks, ttsGenerateFull, withTimeout };
 //# sourceMappingURL=index.d.mts.map
