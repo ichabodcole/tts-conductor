@@ -808,7 +808,7 @@ async function ttsGenerateFull(rawText, provider, config, onProgress, options) {
 		...config.timeouts ?? {}
 	};
 	const onEvent = options?.onEvent;
-	const segments = parseScript(rawText, options?.pauses ?? config.pauses, logger);
+	const segments = parseScript(rawText, options?.pauseTable ?? config.pauseTable, logger);
 	logger?.info?.("[tts] Parsed segments", { count: segments.length });
 	const maxPause = config.maxPauseSeconds;
 	if (maxPause !== void 0 && maxPause > 0) {

@@ -4,7 +4,8 @@ import {
   type VoiceCatalogEntry,
   type VoiceCatalogQuery,
 } from '@alien-lobster-buffet/tts-conductor-core';
-import type { ElevenLabs, ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
+import type { ElevenLabs } from '@elevenlabs/elevenlabs-js';
+import { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 
 /**
  * The raw ElevenLabs voice record exposed via `VoiceCatalogEntry.raw`. Re-exported
@@ -33,6 +34,19 @@ export type ElevenLabsVoiceCategory = ElevenLabs.VoiceResponseModelCategory;
  * round-trips for accounts with large catalogs.
  */
 const CATALOG_PAGE_SIZE = 100;
+
+/**
+ * Convenience factory: construct an {@link ElevenLabsVoiceCatalog} from just an
+ * API key, without requiring the consumer to import `@elevenlabs/elevenlabs-js`
+ * themselves. Equivalent to `new ElevenLabsVoiceCatalog(new ElevenLabsClient({ apiKey }))`,
+ * but keeps the SDK as an internal dependency of this adapter.
+ */
+export function createElevenLabsCatalog(apiKey: string): ElevenLabsVoiceCatalog {
+  if (!apiKey) {
+    throw new Error('createElevenLabsCatalog requires a non-empty apiKey');
+  }
+  return new ElevenLabsVoiceCatalog(new ElevenLabsClient({ apiKey }));
+}
 
 export class ElevenLabsVoiceCatalog implements VoiceCatalog<ElevenLabsRawVoice> {
   constructor(private readonly client: ElevenLabsClient) {}

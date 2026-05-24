@@ -1,6 +1,6 @@
 {
   "name": "@alien-lobster-buffet/tts-conductor-elevenlabs",
-  "version": "0.1.0-alpha.0",
+  "version": "0.2.0-alpha.0",
   "description": "ElevenLabs provider bindings for the TTS Conductor ecosystem",
   "keywords": [
     "tts",
@@ -46,7 +46,7 @@
     "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
-    "@alien-lobster-buffet/tts-conductor-core": "^0.1.0-alpha.0"
+    "@alien-lobster-buffet/tts-conductor-core": "^0.2.0-alpha.0"
   },
   "dependencies": {
     "@elevenlabs/elevenlabs-js": "^2.49.0"

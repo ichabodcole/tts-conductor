@@ -31,7 +31,7 @@ vi.mock('../utils/debug', () => ({
 
 describe('ttsGenerateFull', () => {
   const runtimeConfig: TtsRuntimeConfig = {
-    pauses: {},
+    pauseTable: {},
     logger: {
       info: vi.fn(),
       debug: vi.fn(),
@@ -86,7 +86,7 @@ describe('ttsGenerateFull', () => {
 
     expect(parseScriptMock).toHaveBeenCalledWith(
       'Hello world',
-      runtimeConfig.pauses,
+      runtimeConfig.pauseTable,
       runtimeConfig.logger,
     );
     expect(toChunksMock).toHaveBeenCalled();
@@ -343,28 +343,32 @@ describe('ttsGenerateFull', () => {
     });
   });
 
-  it('uses per-call pause table override when supplied (A1)', async () => {
-    const callPauses = { CUSTOM_PAUSE: 7.5 };
+  it('uses per-call pauseTable override when supplied (A1)', async () => {
+    const callPauseTable = { CUSTOM_PAUSE: 7.5 };
 
     await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
-      pauses: callPauses,
+      pauseTable: callPauseTable,
     });
 
-    // parseScript should receive the per-call pauses, NOT the runtime-config pauses
-    expect(parseScriptMock).toHaveBeenCalledWith('Hello world', callPauses, runtimeConfig.logger);
+    // parseScript should receive the per-call pauseTable, NOT the runtime-config pauseTable
+    expect(parseScriptMock).toHaveBeenCalledWith(
+      'Hello world',
+      callPauseTable,
+      runtimeConfig.logger,
+    );
     expect(parseScriptMock).not.toHaveBeenCalledWith(
       'Hello world',
-      runtimeConfig.pauses,
+      runtimeConfig.pauseTable,
       runtimeConfig.logger,
     );
   });
 
-  it('falls back to runtime-config pauses when no per-call override (A1)', async () => {
+  it('falls back to runtime-config pauseTable when no per-call override (A1)', async () => {
     await ttsGenerateFull('Hello world', provider, runtimeConfig);
 
     expect(parseScriptMock).toHaveBeenCalledWith(
       'Hello world',
-      runtimeConfig.pauses,
+      runtimeConfig.pauseTable,
       runtimeConfig.logger,
     );
   });

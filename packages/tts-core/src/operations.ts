@@ -53,8 +53,8 @@ export async function ttsGenerateFull(
 
   // Per-call pause table overrides the runtime-config pause table when supplied
   // (A1: multi-tenant pause vocabulary without per-tenant conductors).
-  const effectivePauses = options?.pauses ?? config.pauses;
-  const segments = parseScript(rawText, effectivePauses, logger);
+  const effectivePauseTable = options?.pauseTable ?? config.pauseTable;
+  const segments = parseScript(rawText, effectivePauseTable, logger);
   logger?.info?.('[tts] Parsed segments', { count: segments.length });
 
   // V6: clamp pause durations against the configured upper bound before any

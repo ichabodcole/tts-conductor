@@ -12,7 +12,7 @@ import {
 } from "@alien-lobster-buffet/tts-conductor-core";
 
 const conductor = createTtsConductor({
-  pauses: DEFAULT_PAUSE_TABLE,
+  pauseTable: DEFAULT_PAUSE_TABLE,
   logger: console,
   ffmpeg: {
     ffmpegPath: process.env.FFMPEG_PATH,
@@ -62,7 +62,7 @@ class FileSystemDebugSink implements DebugSink {
 }
 
 const conductor = createTtsConductor({
-  pauses: DEFAULT_PAUSE_TABLE,
+  pauseTable: DEFAULT_PAUSE_TABLE,
   debug: new FileSystemDebugSink(), // Enable debug output
 });
 ```
@@ -188,10 +188,31 @@ await conductor.generateFull(
 );
 ```
 
+Without this, jobs synthesizing many chunks may exceed BullMQ's default stall
+timeout and get retried mid-synthesis — wasting API credits and producing
+duplicate audio segments before the original job finishes.
+
 For richer per-stage updates (e.g., emitting structured events to a UI),
 subscribe to `onEvent` as well — both callbacks coexist and fire
 independently. See the `TtsEvent` discriminated union for the exact shape
 (parse-complete, chunk-start, chunk-complete, stitch-start, stitch-complete).
+
+## Untrusted input safety
+
+If your scripts are user-authored or otherwise untrusted, set `maxPauseSeconds`
+on your `TtsRuntimeConfig` to a sane bound:
+
+```ts
+const conductor = createTtsConductor({
+  pauseTable: DEFAULT_PAUSE_TABLE,
+  maxPauseSeconds: 30, // clamp any [PAUSE:Xs] longer than this
+});
+```
+
+The default is unbounded — appropriate for trusted inputs (e.g., guided
+meditation with long contemplative silences) but unsafe for multi-tenant
+orchestrators. Without this clamp, a script like `[PAUSE:99999s]` would
+generate roughly 27 hours of silence per chunk.
 
 ## Script parsing behavior
 

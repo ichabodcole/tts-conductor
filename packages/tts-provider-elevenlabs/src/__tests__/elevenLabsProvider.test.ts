@@ -91,7 +91,7 @@ function createContext(overrides: Partial<TtsRuntimeConfig> = {}): {
   } satisfies NonNullable<TtsRuntimeConfig['logger']>;
 
   const config: TtsRuntimeConfig = {
-    pauses: overrides.pauses ?? {},
+    pauseTable: overrides.pauseTable ?? {},
     logger: overrides.logger ?? logger,
     debug: overrides.debug,
     ffmpeg: overrides.ffmpeg,

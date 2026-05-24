@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { elevenLabsProviderFactory } from '../elevenLabsProvider';
 
 const runtimeConfig: TtsRuntimeConfig = {
-  pauses: {},
+  pauseTable: {},
   logger: {
     info: vi.fn(),
     debug: vi.fn(),

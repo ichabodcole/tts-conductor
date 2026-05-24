@@ -20,7 +20,7 @@
     },
     "packages/tts-core": {
       "name": "@alien-lobster-buffet/tts-conductor-core",
-      "version": "0.1.0-alpha.0",
+      "version": "0.2.0-alpha.0",
       "dependencies": {
         "execa": "^9.6.0",
         "ffmpeg-static": "^5.2.0",
@@ -28,7 +28,7 @@
     },
     "packages/tts-provider-elevenlabs": {
       "name": "@alien-lobster-buffet/tts-conductor-elevenlabs",
-      "version": "0.1.0-alpha.0",
+      "version": "0.2.0-alpha.0",
       "dependencies": {
         "@elevenlabs/elevenlabs-js": "^2.49.0",
       },
@@ -36,7 +36,7 @@
         "@alien-lobster-buffet/tts-conductor-core": "workspace:^",
       },
       "peerDependencies": {
-        "@alien-lobster-buffet/tts-conductor-core": "^0.1.0-alpha.0",
+        "@alien-lobster-buffet/tts-conductor-core": "^0.2.0-alpha.0",
       },
     },
   },

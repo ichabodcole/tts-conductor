@@ -1,6 +1,6 @@
 import type { ElevenLabsClient } from '@elevenlabs/elevenlabs-js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ElevenLabsVoiceCatalog } from '../voiceCatalog';
+import { createElevenLabsCatalog, ElevenLabsVoiceCatalog } from '../voiceCatalog';
 
 type SearchFn = ElevenLabsClient['voices']['search'];
 
@@ -253,5 +253,16 @@ describe('ElevenLabsVoiceCatalog', () => {
     await catalog.listVoices(undefined, { signal: controller.signal });
 
     expect(searchMock.mock.calls[0]?.[1]).toMatchObject({ abortSignal: controller.signal });
+  });
+});
+
+describe('createElevenLabsCatalog', () => {
+  it('returns an ElevenLabsVoiceCatalog instance', () => {
+    const catalog = createElevenLabsCatalog('test-api-key');
+    expect(catalog).toBeInstanceOf(ElevenLabsVoiceCatalog);
+  });
+
+  it('throws when apiKey is empty', () => {
+    expect(() => createElevenLabsCatalog('')).toThrow(/apiKey/i);
   });
 });

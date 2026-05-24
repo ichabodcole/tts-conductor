@@ -316,7 +316,7 @@ interface TtsTimeouts {
 }
 interface TtsRuntimeConfig {
   /** Map of pause labels (e.g. FULL_BREATH) to seconds */
-  pauses: Record<string, number>;
+  pauseTable: Record<string, number>;
   logger?: TtsLogger;
   debug?: DebugSink;
   ffmpeg?: FfmpegConfig;
@@ -348,14 +348,14 @@ interface BuildAudioOptions {
   debugJobId?: string;
   /**
    * Per-call pause table override. When provided, this replaces
-   * {@link TtsRuntimeConfig.pauses} for this call only — useful when one
+   * {@link TtsRuntimeConfig.pauseTable} for this call only — useful when one
    * conductor instance serves multiple tenants or contexts that each need
    * a distinct pause vocabulary without paying for a per-tenant conductor.
    *
    * If omitted, the conductor falls back to the pause table on its
    * {@link TtsRuntimeConfig}.
    */
-  pauses?: Record<string, number>;
+  pauseTable?: Record<string, number>;
   /**
    * Per-call override for {@link ProviderCapabilities.maxCharsPerRequest}.
    * When provided as a positive integer, chunking uses this limit instead of

@@ -35,7 +35,7 @@ const mockFactory = {
 };
 
 const runtimeConfig: TtsRuntimeConfig = {
-  pauses: {},
+  pauseTable: {},
 };
 
 describe('Typed TtsConductor', () => {

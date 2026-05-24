@@ -7,6 +7,7 @@ export {
   elevenLabsProviderFactory,
 } from './elevenLabsProvider';
 export {
+  createElevenLabsCatalog,
   type ElevenLabsRawVoice,
   type ElevenLabsRecordingQuality,
   ElevenLabsVoiceCatalog,
