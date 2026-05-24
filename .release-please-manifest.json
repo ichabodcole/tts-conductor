@@ -1,4 +1,4 @@
 {
   "packages/tts-core": "0.2.0-alpha.0",
-  "packages/tts-provider-elevenlabs": "0.2.0-alpha.0"
+  "packages/tts-provider-elevenlabs": "0.2.0-alpha.1"
 }

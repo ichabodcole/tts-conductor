@@ -7,6 +7,16 @@ import { ElevenLabsClient, ElevenLabsError, ElevenLabsTimeoutError } from "@elev
 * round-trips for accounts with large catalogs.
 */
 const CATALOG_PAGE_SIZE = 100;
+/**
+* Convenience factory: construct an {@link ElevenLabsVoiceCatalog} from just an
+* API key, without requiring the consumer to import `@elevenlabs/elevenlabs-js`
+* themselves. Equivalent to `new ElevenLabsVoiceCatalog(new ElevenLabsClient({ apiKey }))`,
+* but keeps the SDK as an internal dependency of this adapter.
+*/
+function createElevenLabsCatalog(apiKey) {
+	if (!apiKey) throw new Error("createElevenLabsCatalog requires a non-empty apiKey");
+	return new ElevenLabsVoiceCatalog(new ElevenLabsClient({ apiKey }));
+}
 var ElevenLabsVoiceCatalog = class {
 	constructor(client) {
 		this.client = client;
@@ -284,6 +294,6 @@ const elevenLabsProviderFactory = {
 	}
 };
 //#endregion
-export { ELEVENLABS_DEFAULTS, ElevenLabsVoiceCatalog, elevenLabsProviderFactory };
+export { ELEVENLABS_DEFAULTS, ElevenLabsVoiceCatalog, createElevenLabsCatalog, elevenLabsProviderFactory };
 
 //# sourceMappingURL=index.mjs.map

@@ -131,6 +131,13 @@ type ElevenLabsRecordingQuality = ElevenLabs.VoiceResponseModelRecordingQuality;
  * Narrowed type helper for ElevenLabs' voice `category` enum.
  */
 type ElevenLabsVoiceCategory = ElevenLabs.VoiceResponseModelCategory;
+/**
+ * Convenience factory: construct an {@link ElevenLabsVoiceCatalog} from just an
+ * API key, without requiring the consumer to import `@elevenlabs/elevenlabs-js`
+ * themselves. Equivalent to `new ElevenLabsVoiceCatalog(new ElevenLabsClient({ apiKey }))`,
+ * but keeps the SDK as an internal dependency of this adapter.
+ */
+declare function createElevenLabsCatalog(apiKey: string): ElevenLabsVoiceCatalog;
 declare class ElevenLabsVoiceCatalog implements VoiceCatalog<ElevenLabsRawVoice> {
   private readonly client;
   constructor(client: ElevenLabsClient);
@@ -139,5 +146,5 @@ declare class ElevenLabsVoiceCatalog implements VoiceCatalog<ElevenLabsRawVoice>
   }): Promise<VoiceCatalogEntry<ElevenLabsRawVoice>[]>;
 }
 //#endregion
-export { ELEVENLABS_DEFAULTS, type ElevenLabsCallOverrides, type ElevenLabsProviderOptions, type ElevenLabsQuality, type ElevenLabsRawVoice, type ElevenLabsRecordingQuality, ElevenLabsVoiceCatalog, type ElevenLabsVoiceCategory, type ElevenLabsVoiceSettings, elevenLabsProviderFactory };
+export { ELEVENLABS_DEFAULTS, type ElevenLabsCallOverrides, type ElevenLabsProviderOptions, type ElevenLabsQuality, type ElevenLabsRawVoice, type ElevenLabsRecordingQuality, ElevenLabsVoiceCatalog, type ElevenLabsVoiceCategory, type ElevenLabsVoiceSettings, createElevenLabsCatalog, elevenLabsProviderFactory };
 //# sourceMappingURL=index.d.mts.map

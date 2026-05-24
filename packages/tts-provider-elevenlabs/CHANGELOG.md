@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0-alpha.1 — 2026-05-24
+
+### Fixed
+
+- Republished `dist/` artifacts to include the `createElevenLabsCatalog`
+  factory export. The `0.2.0-alpha.0` artifact shipped with the source-level
+  export but a stale compiled `dist/` that pre-dated the factory addition,
+  causing `TS2305: Module has no exported member 'createElevenLabsCatalog'`
+  at every consumer import site. No source change; the dist was rebuilt
+  against the same source code present in `0.2.0-alpha.0`.
+
 ## 0.2.0-alpha.0 — 2026-05-24
 
 ### Breaking Changes
