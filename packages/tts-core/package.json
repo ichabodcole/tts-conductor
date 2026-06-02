@@ -1,6 +1,6 @@
 {
   "name": "@alien-lobster-buffet/tts-conductor-core",
-  "version": "0.2.0-alpha.0",
+  "version": "0.3.0-alpha.0",
   "description": "Core utilities for parsing, chunking, and assembling TTS audio",
   "keywords": [
     "tts",
