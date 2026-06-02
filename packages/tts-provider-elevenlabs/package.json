@@ -1,6 +1,6 @@
 {
   "name": "@alien-lobster-buffet/tts-conductor-elevenlabs",
-  "version": "0.2.0-alpha.1",
+  "version": "0.3.0-alpha.1",
   "description": "ElevenLabs provider bindings for the TTS Conductor ecosystem",
   "keywords": [
     "tts",
