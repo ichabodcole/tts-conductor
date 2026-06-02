@@ -96,6 +96,10 @@ export async function ttsGenerateFull(
   onEvent?.({ kind: 'parse-complete', segments: segments.length, chunks: chunks.length });
 
   const audioParts: { buffer: Buffer; duration: number }[] = [];
+  // Per-chunk provider metadata, collected in chunk order. Each entry is the
+  // chunk's opaque GenerationResult.providerMeta (undefined when the provider
+  // supplied none). Aggregated onto the final result below.
+  const chunkProviderMeta: Array<Record<string, unknown> | undefined> = [];
   let done = 0;
 
   for (let i = 0; i < chunks.length; i++) {
@@ -129,6 +133,9 @@ export async function ttsGenerateFull(
       res.duration ?? (await getAudioDuration(res.audio, config.ffmpeg, logger, signal));
 
     audioParts.push({ buffer: res.audio, duration });
+    // Index-keyed (not push) so the meta stays aligned to its chunk even if the
+    // chunk loop is ever parallelized — push-order would silently misalign.
+    chunkProviderMeta[i] = res.providerMeta;
     done++;
 
     await saveDebugFromBuffer(config, res.audio, {
@@ -145,6 +152,9 @@ export async function ttsGenerateFull(
       total: chunks.length,
       duration,
       size: res.audio.length,
+      // Forward opaque provider metadata only when present, so the event stays
+      // clean (no undefined key) for providers that supply none.
+      ...(res.providerMeta ? { providerMeta: res.providerMeta } : {}),
     });
   }
 
@@ -158,5 +168,8 @@ export async function ttsGenerateFull(
   onProgress?.(100);
   onEvent?.({ kind: 'stitch-complete', duration: final.duration, size: final.size });
 
-  return final;
+  // Attach the chunk-indexed provider metadata only when at least one chunk
+  // supplied some — keeps the field absent for providers that never set it.
+  const hasProviderMeta = chunkProviderMeta.some((meta) => meta !== undefined);
+  return hasProviderMeta ? { ...final, providerMeta: chunkProviderMeta } : final;
 }

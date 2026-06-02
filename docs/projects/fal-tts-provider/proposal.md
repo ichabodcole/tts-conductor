@@ -4,12 +4,12 @@
 **Created:** 2026-06-02
 **Author:** Cole + maestro (Claude)
 
-> Living draft. The provider shape, the one core change, and the cost-metadata
-> alignment are settled. The four starter models' real OpenAPI input schemas have
-> landed (see [Related Documents](#related-documents)) and are reflected below;
-> the only outstanding schema gap is the `$ref`'d sub-schema bodies (VoiceSetting,
-> AudioSetting, SpeakerConfig, File), needed to fully type the object-voice and
-> multi-speaker descriptors. We will adjust as those land.
+> Living draft. The provider shape, the one core change (generic-list
+> `providerMeta`), and the cost-metadata alignment are settled. All four
+> starter-model OpenAPI schemas — including the `$ref`'d sub-schema bodies — have
+> landed (see [Related Documents](#related-documents)) and the descriptor shape is
+> locked. Remaining work is implementation: the `providerMeta` core change (in
+> progress on `feature/provider-meta-passthrough`), then the `-fal` package.
 
 ---
 
@@ -89,7 +89,7 @@ A single descriptor type per `endpoint_id` that is **data for the simple case,
 escape-hatch function for the structurally weird ones**:
 
 ```ts
-// SHAPE IS ILLUSTRATIVE — voice sub-types pending the $ref'd sub-schemas.
+// SHAPE IS ILLUSTRATIVE — to be finalized against the landed OpenAPI schemas.
 interface FalModelDescriptor {
   endpointId: string;
   caps: ProviderCapabilities; // per-model (incl. maxCharsPerRequest)
@@ -117,7 +117,7 @@ starter set (kestrel chose these four precisely to exercise every mechanism):
 | --------------------------- | -------- | --------------------------------------------------------------------------------------------------------- | ----------------------------- |
 | `minimax/speech-02-hd`      | `text`   | `voice_setting` **object** (`voice_id` nested, e.g. `Wise_Woman`)                                         | `buildInput` (object nesting) |
 | `gemini-3.1-flash-tts`      | `prompt` | `voice` enum (30 presets) **or** `speakers: SpeakerConfig[]` (multi-speaker, 2–10, alias-prefixed prompt) | `buildInput` (multi-speaker)  |
-| `chatterbox/text-to-speech` | `text`   | **none** — clone from `audio_url` (File)                                                                  | `buildInput` (clone)          |
+| `chatterbox/text-to-speech` | `text`   | **none** — clone from `audio_url` (plain URL string, not a `File` ref)                                    | `buildInput` (clone)          |
 | `elevenlabs/tts/turbo-v2.5` | `text`   | `voice` **id** (string) + stability/similarity/style/speed                                                | declarative                   |
 
 So among the _starter four_, three need `buildInput` and only elevenlabs-on-fal
@@ -142,29 +142,37 @@ Add an optional, **provider-agnostic** metadata channel so async-billing
 identifiers (fal `request_id`, and Replicate/others later) can reach the
 consumer:
 
-- Add `providerMeta?: Record<string, unknown>` to `GenerationResult`.
+- Add `providerMeta?: Record<string, unknown>` to `GenerationResult` — an opaque
+  per-chunk object core never interprets.
 - Surface it on the `chunk-complete` lifecycle event (per-chunk) for incremental
   attribution.
-- **Aggregate** per-chunk metadata into the final `BuildFinalAudioResult` so
-  consumers that don't subscribe to `onEvent` still get it.
+- **Aggregate** as an ordered, chunk-indexed list on the final result:
+  `BuildFinalAudioResult.providerMeta?: Array<Record<string, unknown> |
+undefined>` (index = chunk index; entry `undefined` when a chunk's provider
+  supplied none; the key is omitted entirely when no chunk supplied any).
 
-Deliberately named `providerMeta` (not `requestId`) to keep core free of any
-single provider's vocabulary. Fully additive — no breaking change.
+Deliberately named `providerMeta` (not `requestId`) and kept as an opaque list —
+core stays free of any single provider's vocabulary. Fully additive, no breaking
+change.
 
-**Cost-metadata alignment (decided with Media Forge).** A TTS job is a
-**fan-out**: the script chunks into N `fal.subscribe` calls, each billing its own
-`request_id` — structurally identical to how Media Forge's image-gen fans out N
-parallel subscribes for models without native batching. MF already sums a _list_
-of request_ids (`resolveFalCostMulti` / `combineFalCostResolutions`). To let MF
-reuse that path verbatim, core mirrors their exact image keys:
+**Cost-metadata alignment (decided with Media Forge — generic-list shape).** A
+TTS job is a **fan-out**: the script chunks into N `fal.subscribe` calls, each
+billing its own `request_id` — structurally identical to how Media Forge's
+image-gen fans out N parallel subscribes for models without native batching. MF
+already sums a _list_ of request_ids (`resolveFalCostMulti` /
+`combineFalCostResolutions`). The contract that lets MF reuse that path with one
+line of glue, **without baking `request_id` into core**:
 
-- The fal adapter sets `providerMeta.request_id` (this chunk's id) per
+- The fal adapter sets `providerMeta = { request_id }` (this chunk's id) per
   `GenerationResult`.
-- Core aggregates into `providerMeta.request_ids: string[]` (chunk-indexed) on
-  the final `BuildFinalAudioResult`, and sets `providerMeta.request_id =
-request_ids[0]` for single-id back-compat — matching MF's image
-  `{ request_id, request_ids }` shape and its read path (reads `request_ids[]`,
-  falls back to `[request_id]`).
+- Core aggregates the opaque per-chunk objects into the ordered
+  `providerMeta` list on the final result.
+- MF derives the id list consumer-side:
+  `const request_ids = result.providerMeta?.map((m) => m?.request_id).filter(Boolean) ?? []`,
+  then `resolveFalCostMulti(request_ids)`. One line; core never learns the
+  `request_id` key. (We chose this over mirroring MF's literal
+  `{ request_id, request_ids }` keys precisely to keep the agnostic core clean —
+  the one-line `.map` is a negligible consumer cost.)
 
 Note the difference from image fan-out: TTS chunks run **sequentially** in the
 core orchestrator (one `generate()` per chunk), so the adapter does _not_ need
@@ -249,11 +257,6 @@ in the per-model descriptors and is bounded by starting with four models.
 
 ## Open Questions
 
-- **Sub-schema bodies** for `voice_setting` (VoiceSetting), `audio_setting`
-  (AudioSetting), `pronunciation_dict` (PronunciationDict), `speakers`
-  (SpeakerConfig), and chatterbox's `audio_url` (File) — needed to fully type the
-  object-voice (minimax) and multi-speaker (gemini) `buildInput`s. The defaults
-  and examples in the artifact are enough to scaffold; exact enums/fields pending.
 - **`CanonicalTtsInput` shape** — the canonical fields the descriptor maps _from_.
   At minimum `{ text, voiceSelection }`; needs a voice-selection union expressive
   enough for id / object-id / multi-speaker / clone-from-audio without leaking
@@ -263,9 +266,15 @@ in the per-model descriptors and is bounded by starting with four models.
 
 **Resolved:**
 
-- `providerMeta` aggregation shape → chunk-indexed `request_ids: string[]` plus
-  `request_id` (first) for back-compat, mirroring Media Forge's image keys so the
-  existing `resolveFalCostMulti` cost path is reused verbatim.
+- `providerMeta` aggregation shape → **generic chunk-indexed list**
+  (`Array<Record<string, unknown> | undefined>`) on the final result; core never
+  interprets it. MF derives `request_ids` consumer-side with a one-line `.map`
+  and feeds `resolveFalCostMulti`. Chosen over MF's literal `{ request_id,
+request_ids }` keys to keep the agnostic core free of provider vocabulary.
+- All four starter-model OpenAPI schemas + their `$ref`'d sub-schema bodies have
+  landed and are sufficient to lock the descriptor. Notable: chatterbox's
+  `audio_url` is a plain inline URL string (not a `File` `$ref`), so the
+  clone path needs only a URL — no multipart/File type.
 
 ## Success Criteria
 

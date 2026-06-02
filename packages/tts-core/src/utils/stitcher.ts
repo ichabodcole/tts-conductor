@@ -236,6 +236,19 @@ export interface BuildFinalAudioResult {
   mimeType: string;
   size: number;
   duration: number;
+  /**
+   * Ordered, chunk-indexed provider metadata aggregated from each chunk's
+   * `GenerationResult.providerMeta` (index `i` is chunk `i`). Entries are
+   * `undefined` for chunks whose provider supplied no metadata. The whole field
+   * is omitted (left `undefined`) when no chunk supplied any. Core never
+   * interprets the contents; consumers derive what they need — e.g.
+   * `result.providerMeta?.map((m) => m?.request_id).filter(Boolean)` to collect
+   * fal `request_id`s for async cost reconciliation.
+   *
+   * This field is populated by the orchestrator (`ttsGenerateFull`), not by
+   * `buildFinalAudio` itself.
+   */
+  providerMeta?: Array<Record<string, unknown> | undefined>;
 }
 
 export async function buildFinalAudio(

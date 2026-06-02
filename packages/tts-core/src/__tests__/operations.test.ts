@@ -46,6 +46,7 @@ describe('ttsGenerateFull', () => {
     toChunksMock.mockReturnValue([{ ssml: 'Hello world', postPause: 0 }]);
     getAudioDurationMock.mockResolvedValue(1.25);
     buildFinalAudioMock.mockResolvedValue({
+      audio: Buffer.from('fake'),
       base64Data: 'ZmFrZQ==',
       mimeType: 'audio/mpeg',
       size: 4,
@@ -340,6 +341,116 @@ describe('ttsGenerateFull', () => {
       expect(onProgress.mock.calls[0]).toEqual([0]);
       // The first event in the stream is parse-complete.
       expect(events[0]?.kind).toBe('parse-complete');
+    });
+  });
+
+  describe('provider metadata passthrough (providerMeta)', () => {
+    it('surfaces per-chunk providerMeta on the chunk-complete event', async () => {
+      const providerWithMeta: TtsProvider = {
+        id: 'meta-provider',
+        caps: provider.caps,
+        async generate() {
+          return {
+            audio: Buffer.from('fake'),
+            duration: 1.25,
+            providerMeta: { request_id: 'req-1' },
+          };
+        },
+      };
+
+      const events: any[] = [];
+      await ttsGenerateFull('Hello world', providerWithMeta, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      const chunkComplete = events.find((e) => e.kind === 'chunk-complete');
+      expect(chunkComplete.providerMeta).toEqual({ request_id: 'req-1' });
+    });
+
+    it('omits the providerMeta key on chunk-complete when the provider supplies none', async () => {
+      // The default `provider` (beforeEach) returns no providerMeta — the event
+      // should not carry the key at all (the `: {}` conditional-spread branch).
+      const events: any[] = [];
+      await ttsGenerateFull('Hello world', provider, runtimeConfig, undefined, {
+        onEvent: (e) => {
+          events.push(e);
+        },
+      });
+
+      const chunkComplete = events.find((e) => e.kind === 'chunk-complete');
+      expect('providerMeta' in chunkComplete).toBe(false);
+    });
+
+    it('aggregates per-chunk providerMeta into an ordered chunk-indexed list on the final result', async () => {
+      toChunksMock.mockReturnValueOnce([
+        { ssml: 'a', postPause: 0 },
+        { ssml: 'b', postPause: 0 },
+        { ssml: 'c', postPause: 0 },
+      ]);
+
+      let call = 0;
+      const providerWithMeta: TtsProvider = {
+        id: 'meta-provider',
+        caps: provider.caps,
+        async generate() {
+          const idx = call++;
+          return {
+            audio: Buffer.from('fake'),
+            duration: 1,
+            providerMeta: { request_id: `req-${idx}` },
+          };
+        },
+      };
+
+      const result = await ttsGenerateFull('a b c', providerWithMeta, runtimeConfig);
+
+      expect(result.providerMeta).toEqual([
+        { request_id: 'req-0' },
+        { request_id: 'req-1' },
+        { request_id: 'req-2' },
+      ]);
+    });
+
+    it('preserves chunk order with undefined holes for chunks whose provider supplies no meta', async () => {
+      toChunksMock.mockReturnValueOnce([
+        { ssml: 'a', postPause: 0 },
+        { ssml: 'b', postPause: 0 },
+        { ssml: 'c', postPause: 0 },
+      ]);
+
+      let call = 0;
+      const providerWithSparseMeta: TtsProvider = {
+        id: 'sparse-meta-provider',
+        caps: provider.caps,
+        async generate() {
+          const idx = call++;
+          // Only the middle chunk carries metadata.
+          return idx === 1
+            ? { audio: Buffer.from('fake'), duration: 1, providerMeta: { request_id: 'req-1' } }
+            : { audio: Buffer.from('fake'), duration: 1 };
+        },
+      };
+
+      const result = await ttsGenerateFull('a b c', providerWithSparseMeta, runtimeConfig);
+
+      expect(result.providerMeta).toEqual([undefined, { request_id: 'req-1' }, undefined]);
+      // The list must be DENSE — explicit `undefined` entries, NOT sparse holes —
+      // so consumers iterating with .map/.filter visit every slot. (`toEqual`
+      // above treats holes and `undefined` as equal, so it can't prove this on
+      // its own; assert denseness and the documented consumer pattern directly.)
+      expect(result.providerMeta).toHaveLength(3);
+      expect(0 in (result.providerMeta ?? [])).toBe(true);
+      expect(2 in (result.providerMeta ?? [])).toBe(true);
+      expect(result.providerMeta?.map((m) => m?.request_id).filter(Boolean)).toEqual(['req-1']);
+    });
+
+    it('omits providerMeta entirely when no chunk supplies any', async () => {
+      // The default `provider` (beforeEach) returns no providerMeta.
+      const result = await ttsGenerateFull('Hello world', provider, runtimeConfig);
+
+      expect(result.providerMeta).toBeUndefined();
     });
   });
 
