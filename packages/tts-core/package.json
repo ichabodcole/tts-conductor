@@ -1,6 +1,6 @@
 {
   "name": "@alien-lobster-buffet/tts-conductor-core",
-  "version": "0.1.0-alpha.0",
+  "version": "0.2.0-alpha.0",
   "description": "Core utilities for parsing, chunking, and assembling TTS audio",
   "keywords": [
     "tts",
@@ -43,6 +43,7 @@
     "build": "tsdown",
     "clean": "tsdown --clean",
     "dev": "tsdown --watch",
+    "prepublishOnly": "tsdown",
     "test": "vitest --run --config ../../vitest.config.ts",
     "typecheck": "tsc --noEmit"
   },

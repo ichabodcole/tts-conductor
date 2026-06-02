@@ -22,7 +22,10 @@ const mockFactory = {
 
 describe('TtsProviderFactory', () => {
   it('creates provider using context configuration', async () => {
-    const provider = mockFactory.create({ config: { pauses: {} }, id: 'mock' }, { token: 'abc' });
+    const provider = mockFactory.create(
+      { config: { pauseTable: {} }, id: 'mock' },
+      { token: 'abc' },
+    );
     const result = await provider.generate('hello');
 
     expect(provider.caps.maxInlineBreakSeconds).toBe(1);

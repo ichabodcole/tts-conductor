@@ -4,7 +4,7 @@ import type { TtsRuntimeConfig } from '../config';
 describe('TtsRuntimeConfig', () => {
   it('allows optional logger and debug sinks', () => {
     const config: TtsRuntimeConfig = {
-      pauses: { SHORT: 1 },
+      pauseTable: { SHORT: 1 },
       logger: {
         info: () => {},
       },
@@ -13,14 +13,14 @@ describe('TtsRuntimeConfig', () => {
       },
     };
 
-    expect(config.pauses.SHORT).toBe(1);
+    expect(config.pauseTable.SHORT).toBe(1);
     expect(config.logger?.info).toBeTypeOf('function');
     expect(config.debug?.saveBuffer).toBeTypeOf('function');
   });
 
   it('can optionally include ffmpeg configuration', () => {
     const config: TtsRuntimeConfig = {
-      pauses: {},
+      pauseTable: {},
       ffmpeg: {
         ffmpegPath: '/usr/bin/ffmpeg',
         ffprobePath: '/usr/bin/ffprobe',

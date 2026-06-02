@@ -1,114 +1,140 @@
 # Project Summary
 
-**Last Updated:** 2026-05-22
-**Project Status:** Paused (last commit 2025-11-20, ~6 months dormant)
+**Last Updated:** 2026-05-24
+**Project Status:** Active Development
 
 ## Overview
 
-`tts-conductor` is a small TypeScript monorepo that provides reusable building blocks for text-to-speech orchestration. The core package handles the parts of TTS that don't depend on a specific vendor — parsing scripts with inline pause markers into segments, chunking those segments to fit provider character and break-length limits, invoking a registered provider once per chunk, and stitching the resulting audio buffers into a final track with ffmpeg.
+`tts-conductor` is a published-to-npm TypeScript library that orchestrates text-to-speech synthesis across pluggable providers. Application authors hand it a script (with optional inline pause markers like `[PAUSE:5s]` or `[PAUSE:BREATH]`), it parses, chunks the input within per-provider character limits, synthesizes each chunk through a provider adapter, and stitches the resulting audio segments together via ffmpeg into a single deliverable file with deterministic inter-chunk pauses.
 
-The defining design decision is a provider-pluggable contract: `@alien-lobster-buffet/tts-conductor-core` knows nothing about specific TTS vendors, and concrete adapters implement a small `TtsProvider` interface. The first (and currently only) adapter is `@alien-lobster-buffet/tts-conductor-elevenlabs`, which wraps the official ElevenLabs JS SDK.
+The strategic positioning is "reusable orchestration core so application authors don't hand-roll the parse/chunk/stitch pipeline for every TTS surface." The provider abstraction is intentionally narrow — one generation method, one capabilities object, optional voice-catalog — so adding new providers (OpenAI TTS, Cartesia, Google) doesn't ripple into core changes.
 
-The repo has been quiet since November 2025 — the architecture and one adapter are in place, but no further providers or feature work have landed since.
+Published as two npm packages under the `@alpha` tag as of 2026-05-24: `@alien-lobster-buffet/tts-conductor-core@0.2.0-alpha.0` and `@alien-lobster-buffet/tts-conductor-elevenlabs@0.2.0-alpha.1`. Two production consumers are integrating today: Story Loom (single-tenant guided storytelling) and Media Forge (multi-tenant TTS-as-a-service).
 
 ## Core Technologies
 
-- **Primary Language:** TypeScript 5.9 (ESM, `type: module`)
-- **Workspace:** pnpm 8.15.5 + Turborepo 2.6
-- **Build Tools:** tsdown 0.16.6 (recently migrated from tsup), release-please for version automation
-- **Key Dependencies:** `@elevenlabs/elevenlabs-js` (provider), `execa` + `ffmpeg-static` (core audio stitching/probing)
-- **Development Tools:** Vitest 3.2 (`@vitest/coverage-v8`), ESLint 9 flat config + `eslint-config-turbo`, Prettier 3.6, Husky 9
-- **Runtime:** Node ≥18.18, requires `ffmpeg`/`ffprobe` available, `ELEVENLABS_API_KEY` env var
+- **Primary Language:** TypeScript (5.x), targeting Node 18+
+- **Runtime / package manager:** Bun 1.3.9, workspace pattern `packages/*`
+- **Build orchestration:** Turborepo (task graph: `^build` is a dep of `typecheck`/`test`)
+- **Bundler:** tsdown (rolldown-based, emits ESM + `.d.mts` declarations)
+- **Linter/formatter:** Biome 2.x (replaced ESLint + Prettier in the 2026-05-22 migration)
+- **Test runner:** Vitest (workspace-aware)
+- **Audio pipeline:** ffmpeg / ffprobe via execa
+- **Provider SDK:** `@elevenlabs/elevenlabs-js@^2.49.0` (for the bundled provider)
 
 ## Project Structure
 
 ```
 packages/
-  tts-core/                  # parsing, chunking, ffmpeg stitching, provider registry
+  tts-core/                      # @alien-lobster-buffet/tts-conductor-core
     src/
-      conductor.ts           # provider registry + createProvider
-      factory.ts             # TtsProviderContext, factory contract
-      provider.ts            # TtsProvider interface, GenerationResult
-      operations.ts          # ttsGenerateFull: parse → chunk → generate → stitch
-      config.ts, defaults.ts # runtime config
-      utils/                 # segmenter, chunker, duration, stitcher, pause, debug
-      __tests__/             # 9 Vitest suites
-  tts-provider-elevenlabs/   # ElevenLabs SDK bridge implementing TtsProvider
+      conductor.ts               # TtsConductor class
+      config.ts                  # TtsRuntimeConfig, BuildAudioOptions
+      defaults.ts                # OUTPUT_FORMATS, DEFAULT_PAUSE_TABLE
+      errors.ts                  # TtsError + retry-classification subclasses
+      events.ts                  # TtsEvent discriminated union
+      factory.ts                 # provider registry / createProvider
+      operations.ts              # ttsGenerateFull orchestration
+      provider.ts                # TtsProvider interface
+      voice-catalog.ts           # VoiceCatalog interface
+      utils/                     # stitcher, chunker, segmenter, duration probing
+      __tests__/
+
+  tts-provider-elevenlabs/       # @alien-lobster-buffet/tts-conductor-elevenlabs
     src/
-      elevenLabsProvider.ts
-      __tests__/             # 3 Vitest suites
-docs/
-  proposals/                 # design proposals (1: tts-interface-alignment ✅)
-  sessions/                  # work-session logs (1: 2025-09-29)
-  lessons-learned.md         # template only — no entries yet
-  reports/                   # discovery reports
+      elevenLabsProvider.ts      # SDK adapter, error mapping, stream-to-buffer
+      voiceCatalog.ts            # ElevenLabsVoiceCatalog + createElevenLabsCatalog factory
+      __tests__/
+
+docs/                            # scaffold-template structure (migrated 2026-05-24)
+  projects/<name>/{proposal.md, plan.md, sessions/}
+  projects/_archive/<name>/      # completed projects
+  backlog/                       # pre-publish backlog + deferred items
+  architecture/  specifications/ playbooks/ lessons-learned/ memories/
+  briefs/  fragments/  interaction-design/  investigations/  reports/
 ```
 
-The codebase is small (~450 LoC of source across both packages) and organized by responsibility, not by feature.
+Two-package monorepo. The core package has no SDK dependencies; the provider package wraps the ElevenLabs SDK and satisfies the core's `TtsProvider` contract. Future providers will follow the same shape (one package per provider, peerDep on core).
 
 ## Documented Systems
 
-No `docs/architecture/` directory exists. Architectural intent is captured implicitly across `AGENTS.md`, the proposal, and the session note.
+No architecture documents have been written yet. The patterns evidenced in code and session notes are worth formalizing in a future architecture pass:
 
-- **TTS core ↔ provider contract** — Documented in `docs/proposals/tts-interface-alignment.md` (completed 2025-09-29). Establishes that `TtsProvider` exposes a `readonly id: string` (flowed through `TtsProviderContext` at construction time) and a `generate(chunk)` returning `GenerationResult { audio, mimeType?, duration?, size? }` with optional metadata fields. When a provider supplies `duration`, the core trusts it and skips a redundant ffprobe call.
+- **Provider-as-isolation-boundary** — all SDK-specific concerns live in the provider package; the core knows nothing about ElevenLabs. The SDK 1→2 migration was invisible to consumers, validating the boundary.
+- **Parse → chunk → synthesize → stitch pipeline** — the deterministic orchestration that `ttsGenerateFull` runs.
+- **Full-replace override semantics** — per-call overrides (`voiceSettings`, `pauseTable`) replace construction-time values entirely. Documented in code comments but not yet in a formal architecture doc.
+
+(Recommended for the next architecture sweep — see the discovery report.)
 
 ## Application Specifications
 
-No application specifications have been created yet. `docs/specifications/` does not exist.
+No application specifications expected — this is a library, not an application. `docs/specifications/` is scaffolded but intentionally empty.
 
 ## Recent Activity (Last 30 Days)
 
-**Zero commits in the last 30 days.** The repository has been dormant since 2025-11-20.
+All 22 commits in the last 30 days cluster in 2026-05-22 → 2026-05-24. The project went from pre-publish hardening to two alpha versions in production with two real consumers in roughly 72 hours.
 
-The most recent burst of work (Sept–Nov 2025) focused on build-tooling and interface polish, not features:
+**Active Work Areas:**
 
-- `66870b4` — tsup → tsdown migration
-- `8335b71` — processing-stage / debug typing refactor
-- `0688a78` — Turbo v2 upgrade, ESLint config updates
-- `cd65f33` — core↔provider interface alignment (the proposal above, fully implemented)
-- Earlier: release-please + Husky automation, initial implementation of core + ElevenLabs provider
+- **alpha-release coordination** — alpha.0 → alpha.0.2 → alpha.1 hotfix → publish-build-safety hardening, with two production consumers integrating in parallel
+- **Doc-structure migration** — flat `docs/` to scaffold-template structure (this commit)
 
 **Recent Sessions:**
 
-- 2025-09-29 — Interface review and implementation (see `docs/sessions/2025-09-29-interface-review-session.md`). Drove the core↔provider contract refactor: added provider `id` propagation through context, made `GenerationResult` metadata optional, eliminated duplicate ffprobe duration calls.
+- 2026-05-24 — `pause-table-rename-and-catalog-factory-session` (alpha.0.2 release, see `projects/multi-tenant-pauses-and-catalog/sessions/`)
+- 2026-05-24 — `publish-build-safety-session` (closing the stale-dist failure mode, see `projects/publish-build-safety/sessions/`)
+- 2026-05-23 — 11 archived sessions documenting the alpha.0 pre-publish hardening sprint (see `projects/_archive/alpha-0-publish-prep/sessions/`)
+
+**Notable Changes:**
+
+- `pauses` → `pauseTable` rename (breaking, alpha-window only) on both `TtsRuntimeConfig` and `BuildAudioOptions`, ack-gated by both alpha consumers via Agent Bridge before publish
+- `createElevenLabsCatalog(apiKey)` factory added to `-elevenlabs`, removing the consumer-side duplicate-SDK-dep trap
+- Publish system hardened: `prepublishOnly: tsdown` on both packages; `dist/` gitignored; turbo `typecheck` rewired to `^build` so cold-start workflows resolve correctly
 
 ## Current Direction
 
-**Active Projects:** None. There is no `docs/projects/` directory and the only proposal is marked completed.
+**Active Projects:**
 
-**In Progress Investigations:** None. There is no `docs/investigations/` directory.
+- `multi-tenant-pauses-and-catalog` — shipped as `0.2.0-alpha.0` + alpha.1; in production at both consumers (see `docs/projects/multi-tenant-pauses-and-catalog/`)
+- `publish-build-safety` — shipped on develop (this branch); activates on next publish (see `docs/projects/publish-build-safety/`)
 
-Based on commit trajectory before dormancy, the project was sharpening the core↔provider seam to make additional adapters cheap to add — but that second adapter has not materialized. The repo is in a "shippable but paused" state.
+**In Progress Investigations:** None.
+
+**Backlog highlights** (`docs/backlog/deferred-items.md`):
+
+- `usage` field on `GenerationResult` (requested by Media Forge for per-tenant billing)
+- Audio-primitives package extraction (`mp3ToWav` / `concatenateAudio` for non-synthesis consumers; requested by Story Loom)
+- Several polish items (eager-`base64Data` deprecation, ffprobe-per-chunk doc emphasis, etc.)
+
+The library is in its **breaking-change window**. Alpha cadence will continue while the API stabilizes; expect `0.3.0-alpha.x` whenever the next batch of consumer-feedback-driven shape changes lands. 1.0 will follow once the API surface has stabilized across multiple consumers.
 
 ## Development Patterns & Practices
 
-- **Sessions log:** `docs/sessions/` with `YYYY-MM-DD-short-topic.md` naming, per `AGENTS.md`. One entry exists.
-- **Lessons learned:** `docs/lessons-learned.md` referenced by `AGENTS.md` as a living log, but currently only contains a template — no real entries.
-- **Proposals:** Substantive design changes get a markdown proposal under `docs/proposals/` with implementation details, before/after interface diffs, and acceptance criteria. One example exists and was fully delivered.
-- **Testing:** Vitest with suites colocated under `src/__tests__/`. ffmpeg interactions are mocked — real binaries should not be invoked in tests.
-- **Formatting:** Prettier with 100-col width, single quotes, trailing commas. lowerCamelCase for variables/functions, PascalCase for types/classes.
-- **Releases:** release-please drives version bumps automatically based on conventional commits. Husky runs pre-commit hooks.
+- **Bridge-coordinated alpha releases.** Breaking changes are pre-coordinated with both alpha consumers via Agent Bridge thread. Both consumers must ack the change before publish. Pattern is repeatable but not yet captured as a formal playbook.
+- **Proposal → plan → session triad** per project. Every shipped change has a `proposal.md` (the why), a `plan.md` (the how, when complex enough), and one or more `sessions/<date>-*.md` files (the durable record of what actually happened).
+- **Independent code review via subagent.** Even when one agent fills both strategist and engineer roles, the code review step is dispatched to a separate subagent (`feature-dev:code-reviewer`) for fresh-eyes review.
+- **Manual `npm publish`** from Cole's account (no CI publish yet). `prepublishOnly` script ensures fresh build at publish time.
+- **Playbooks:** None in this repo. The "Publishing a Bun workspace to npm" playbook lives in Hivemind (extracted from this project's first publish).
+- **Lessons Learned:** Empty in this repo. Captured material lives in session docs and the deferred-items backlog.
 
 ## Quick Start for New Contributors
 
-1. Install dependencies: `pnpm install`
-2. Build all packages: `pnpm build`
-3. Run tests: `pnpm test` (or `pnpm --filter @alien-lobster-buffet/tts-conductor-core test` to target one package)
-4. Full local CI: `pnpm verify` (format-check + typecheck + lint + test)
-5. Read for context:
-   - `AGENTS.md` — repository conventions, session/lessons-learned practices
-   - `docs/proposals/tts-interface-alignment.md` — the core↔provider contract and its rationale
-   - `packages/tts-core/src/operations.ts` — the orchestration flow in one file
-
-Note: ffmpeg/ffprobe must be available at runtime (provided via `ffmpeg-static` for the bundled binary); ElevenLabs integration requires `ELEVENLABS_API_KEY`.
+1. Install dependencies: `bun install`
+2. Build (regenerates `dist/` for both packages): `bun run build`
+3. Full gate (typecheck + lint + tests): `bun run check`
+4. Run tests for one package: `bun run --filter @alien-lobster-buffet/tts-conductor-core test`
+5. Read key docs:
+   - `docs/projects/multi-tenant-pauses-and-catalog/proposal.md` — the most recent shipped change, gives a sense of the API surface
+   - `docs/backlog/deferred-items.md` — what's queued for post-alpha triage
+   - `packages/tts-core/README.md` and `packages/tts-provider-elevenlabs/README.md` — package-level consumer-facing docs
 
 ## Key Insights
 
-- **The point of this project is the contract, not the adapter.** `@alien-lobster-buffet/tts-conductor-core` was deliberately designed to be vendor-agnostic; the ElevenLabs package is one concrete proof of that contract. The interesting code is in `provider.ts`, `factory.ts`, `conductor.ts`, and `operations.ts`.
-- **Provider ID flows through context, not constructors.** The conductor stamps `id` onto `TtsProviderContext` at `createProvider` time; providers assign `this.id = ctx.id`. This eliminates unsafe casts in the core's logging and keeps factory IDs and instance IDs in sync without duplication.
-- **The core trusts providers with metadata.** `GenerationResult.duration` is optional; when present, the core skips ffprobe. This was the headline perf win from the 2025-09-29 interface alignment.
-- **Stale spots worth knowing about:** the root `README.md` still references `tsup` (migrated to `tsdown`); `docs/lessons-learned.md` is a template with no real entries; both packages are `license: "UNLICENSED"` despite v1.1.0 release tooling being wired up. None are blockers, but worth a sweep when work resumes.
+- **Provider-as-isolation-boundary is load-bearing.** The ElevenLabs SDK 1→2 migration touched only the provider package, never the core. Future SDK churn (when ElevenLabs ships a 3.x, when Cartesia/OpenAI providers get added) should benefit from the same pattern. Don't compromise the boundary for short-term convenience.
+- **The 2026-05-23 sprint was an exception, not the cadence.** 11 named sessions in one day was the pre-publish push, not a sustainable rhythm. Steady state should be one focused project at a time, ack-gated with consumers on breaking changes.
+- **Multi-consumer alpha testing surfaces what single-consumer testing misses.** The convergent ask on the `pauseTable` name from both Story Loom and Media Forge was the load-bearing signal that justified the breaking rename. Single-consumer feedback would have left it ambiguous.
+- **Build-system failure modes need belt-and-suspenders.** The alpha.1 hotfix root-caused to a layering issue (committed dist drifted from source). The publish-build-safety fix lives at three layers (turbo task ordering, `prepublishOnly`, gitignored `dist/`) because no single layer was sufficient. Generalize: trust the source as the only authoritative copy; derive everything else fresh.
 
 ---
 
-_This summary was generated by analyzing the codebase, documentation, and recent activity. It represents the actual state of the project as discovered, not just stated intentions. See `docs/reports/2026-05-22-project-summary-report.md` for the discovery process and findings._
+_This summary was generated by analyzing the codebase, documentation, and recent activity. It represents the actual state of the project as discovered, not just stated intentions._

@@ -59,6 +59,14 @@ export interface TtsChunkCompleteEvent {
   duration: number;
   /** Chunk audio buffer length in bytes — matches `GenerationResult.size` convention. */
   size: number;
+  /**
+   * Opaque provider metadata for this chunk, forwarded verbatim from
+   * `GenerationResult.providerMeta`. Present only when the provider supplied it
+   * (e.g., a fal `request_id`); omitted otherwise. Lets consumers attribute
+   * per-chunk detail incrementally as the job streams, without waiting for the
+   * aggregated `BuildFinalAudioResult.providerMeta` list.
+   */
+  providerMeta?: Record<string, unknown>;
 }
 
 /** Fires before `buildFinalAudio` starts assembling the chunks. */

@@ -28,6 +28,16 @@ export interface GenerationResult {
   duration?: number;
   /** Audio buffer size in bytes if the provider returns it. */
   size?: number;
+  /**
+   * Opaque, provider-specific metadata for this chunk. Core never interprets
+   * it — it forwards the object onto the `chunk-complete` lifecycle event and
+   * collects it into the chunk-indexed `BuildFinalAudioResult.providerMeta`
+   * list. Use it to surface async-billing identifiers (e.g., a fal
+   * `request_id`) or any other per-call provider detail consumers need to
+   * reconcile after the job completes. Keeping it generic — rather than a named
+   * `requestId` field — keeps core free of any single provider's vocabulary.
+   */
+  providerMeta?: Record<string, unknown>;
 }
 
 /**

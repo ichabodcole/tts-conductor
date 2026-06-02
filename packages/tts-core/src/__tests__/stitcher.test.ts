@@ -31,7 +31,7 @@ vi.mock('ffmpeg-static', () => ({
 }));
 
 const config = {
-  pauses: {},
+  pauseTable: {},
   logger: {
     info: () => {},
     debug: () => {},

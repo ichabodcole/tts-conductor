@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { elevenLabsProviderFactory } from '../elevenLabsProvider';
 
 const runtimeConfig: TtsRuntimeConfig = {
-  pauses: {},
+  pauseTable: {},
 };
 
 const context: TtsProviderContext = {

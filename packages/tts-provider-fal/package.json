@@ -1,0 +1,59 @@
+{
+  "name": "@alien-lobster-buffet/tts-conductor-fal",
+  "version": "0.2.0-alpha.0",
+  "description": "fal.ai provider bindings for the TTS Conductor ecosystem",
+  "keywords": [
+    "tts",
+    "fal",
+    "fal-ai",
+    "provider"
+  ],
+  "license": "MIT",
+  "author": "Cole Reed <alienlobsterbuffet.dev@gmail.com>",
+  "homepage": "https://github.com/ichabodcole/tts-conductor#readme",
+  "bugs": {
+    "url": "https://github.com/ichabodcole/tts-conductor/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ichabodcole/tts-conductor.git",
+    "directory": "packages/tts-provider-fal"
+  },
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    }
+  },
+  "main": "./dist/index.mjs",
+  "types": "./dist/index.d.mts",
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsdown",
+    "clean": "tsdown --clean",
+    "dev": "tsdown --watch",
+    "prepublishOnly": "tsdown",
+    "test": "vitest --run --config ../../vitest.config.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@alien-lobster-buffet/tts-conductor-core": "^0.2.0-alpha.0"
+  },
+  "dependencies": {
+    "@fal-ai/client": "^1.10.1"
+  },
+  "devDependencies": {
+    "@alien-lobster-buffet/tts-conductor-core": "workspace:^"
+  }
+}
