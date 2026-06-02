@@ -222,7 +222,7 @@ shapes, not the execution model.
   `fal.subscribe(endpointId, input, { abortSignal: opts.signal })`, collects the
   audio buffer, sets `duration` from fal's audio metadata when present (avoids
   the ffprobe fallback), and returns the fal `request_id` in
-  `providerMeta.requestId`.
+  `providerMeta.request_id`.
 - **SSML wrinkle (adapter-side, not a blocker).** Core wraps every chunk as
   `` `<speak>${chunk.ssml}</speak>` `` (`operations.ts:108`) — an 11labs-ism, since
   most fal engines won't accept SSML. The adapter strips the wrapper and sets

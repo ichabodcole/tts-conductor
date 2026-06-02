@@ -1,15 +1,24 @@
 # `FalModelDescriptor` design
 
-**Status:** Draft for review (kestrel)
+**Status:** Implemented (`packages/tts-provider-fal`, branch `feature/fal-provider-package`)
 **Created:** 2026-06-02
 **Author:** Cole + maestro (Claude)
 **Companion:** [proposal.md](./proposal.md) · schemas:
 `media-forge/docs/investigations/artifacts/2026-06-02-fal-tts-starter-schemas.md`
 
-> Reviewable shape for the `-fal` package internals, designed against the four
-> starter models' real OpenAPI schemas. No package code yet — this is the
-> contract we lock before writing it. **kestrel: the gemini `speakers[]` path is
-> §4.2.**
+> The shape below was the reviewed design; the package now implements it. **As-built
+> deltas** (from kestrel's Q3 response-shape answers): `extractAudio` returns
+> `{ url, mimeType }` (all four models return `audio` as a fetchable URL, so the
+> provider does one shared abort-aware fetch) rather than `{ audio: Buffer }`;
+> `extractDuration` is minimax-only (`duration_ms / 1000`); minimax forces
+> `output_format: 'url'`; and `voiceCatalog` ships for **gemini only** (its 30-voice
+> enum is the one schema-authoritative set — minimax/elevenlabs `voice` are free
+> strings, chatterbox is clone-only). `caps.maxCharsPerRequest` defaults are
+> deliberate **soft** values tuned for narration (minimax/gemini/chatterbox 5000,
+> elevenlabs 2000), overridable per job via `BuildAudioOptions` — note gemini's is
+> 5000, well under its 50000 schema limit, to bound request/reconcile/seam count
+> (the §4 sketches' inline `= 50000` comment is superseded). The gemini
+> `speakers[]` path is §4.2.
 
 ---
 
